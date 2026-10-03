@@ -1,0 +1,42 @@
+# Trusted source registry (see docs/04-source-registry.md).
+#
+# Only `enabled: true` entries with `verification.status: verified` are trusted.
+# Verified requires authoritative ownership evidence: an official publisher page linking
+# to the channel, resolved to an immutable channel ID. Handle/ID/RSS agreement alone only
+# proves identity consistency, not authorization.
+#
+# Candidate IDs came from desk research on 2026-10-02 (@handle → channel ID → RSS title).
+# They are NOT trusted until ownership evidence is recorded.
+
+sources:
+  - id: nfl-youtube
+    sport: nfl
+    displayName: NFL
+    tier: 1
+    platform: youtube
+    channelId: UCDVYQ4Zhbm3S2dlz7P1GBDg
+    enabled: true
+    regions: [US]
+    competitions: [NFL]
+    verification:
+      status: verified
+      verifiedAt: "2026-10-02"
+      evidenceUrl: https://www.nfl.com/
+      method: >-
+        nfl.com footer "Youtube" link → https://www.youtube.com/user/NFL/ ;
+        YouTube channels.list(forUsername=NFL) → UCDVYQ4Zhbm3S2dlz7P1GBDg (@nfl).
+
+  # ---- Candidates (disabled; verify before enabling) ----
+  - { id: nba-youtube, sport: nba, displayName: NBA, tier: 1, platform: youtube, channelId: UCWJ2lWNubArHWmf3FIHbfcQ, enabled: false, regions: [US], competitions: [NBA], verification: { status: candidate } }
+  - { id: mlb-youtube, sport: mlb, displayName: MLB, tier: 1, platform: youtube, channelId: UCoLrcjPV5PbUrUyXq5mjc_A, enabled: false, regions: [US], competitions: [MLB], verification: { status: candidate } }
+  - { id: f1-youtube, sport: f1, displayName: Formula 1, tier: 1, platform: youtube, channelId: UCB_qr75-ydFVKSF9Dmo6izg, enabled: false, regions: [US], competitions: [F1], verification: { status: candidate } }
+  - { id: icc-youtube, sport: cricket, displayName: ICC, tier: 1, platform: youtube, channelId: UCt2JXOLNxqry7B_4rRZME3Q, enabled: false, regions: [US], competitions: [ICC], verification: { status: candidate } }
+  - { id: tennistv-youtube, sport: tennis, displayName: Tennis TV, tier: 2, platform: youtube, channelId: UCbcxFkd6B9xUU54InHv4Tig, enabled: false, regions: [US], competitions: [ATP], verification: { status: candidate } }
+  - { id: wimbledon-youtube, sport: tennis, displayName: Wimbledon, tier: 2, platform: youtube, channelId: UCNa8NxMgSm7m4Ii9d4QGk1Q, enabled: false, regions: [US], competitions: [Wimbledon], verification: { status: candidate } }
+  - { id: ausopen-youtube, sport: tennis, displayName: Australian Open, tier: 2, platform: youtube, channelId: UCeTKJSW1NTAkf27nNmjWt5A, enabled: false, regions: [US], competitions: [Australian Open], verification: { status: candidate } }
+  - { id: rolandgarros-youtube, sport: tennis, displayName: Roland-Garros, tier: 2, platform: youtube, channelId: UCF3K1Jf8hjFW8qliei8fQ3A, enabled: false, regions: [US], competitions: [Roland-Garros], verification: { status: candidate } }
+  - { id: usopen-tennis-youtube, sport: tennis, displayName: US Open Tennis, tier: 2, platform: youtube, channelId: UCXbboag48Qlr78zzz6SkzkQ, enabled: false, regions: [US], competitions: [US Open], verification: { status: candidate } }
+  - { id: nbcsports-youtube, sport: soccer, displayName: NBC Sports, tier: 3, platform: youtube, channelId: UCqZQlzSHbVJrwrn5XvzrzcA, enabled: false, regions: [US], competitions: [EPL], verification: { status: candidate } }
+  - { id: fifa-youtube, sport: soccer, displayName: FIFA, tier: 2, platform: youtube, channelId: UCpcTrCXblq78GZrTUTLWeBw, enabled: false, regions: [US], competitions: [FIFA], verification: { status: candidate } }
+  - { id: uefa-youtube, sport: soccer, displayName: UEFA, tier: 2, platform: youtube, channelId: UCyGa1YEx9ST66rYrJTGIKOw, enabled: false, regions: [US], competitions: [UEFA], verification: { status: candidate } }
+  - { id: willow-youtube, sport: cricket, displayName: Willow, tier: 3, platform: youtube, channelId: UC2V_LHwvaNS2XWZ5l8x3jLQ, enabled: false, regions: [US], competitions: [Bilateral], verification: { status: candidate, notes: "Ambiguous: @willow (UC2V_LHwvaNS2XWZ5l8x3jLQ, 'Willow by Cricbuzz') vs @WillowTVCricket (UCg_FrRwaLBTjxPuUFas4j9w). Confirm on willow.tv." } }

@@ -1,0 +1,11 @@
+{
+  "name": "@sportscenter/engine",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@sportscenter/contracts": "workspace:*",
+    "yaml": "^2.8.0",
+    "zod": "^4.1.0"
+  }
+}

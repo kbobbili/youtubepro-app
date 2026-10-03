@@ -53,13 +53,24 @@ Before heavy polish, validate eligible-event-to-playable-highlight coverage over
 **Why:** The TV and user are in the US; regional rights (e.g. US soccer broadcasters, US cricket rights) and region-blocked uploads depend on it.  
 **Consequences:** Playability checks evaluate US availability. Region stays a configuration value so registry entries keep their `regions[]` scope.
 
+## ADR-016 — ESPN-first event data behind per-sport adapters
+**Decision:** Start each sport with ESPN's public scoreboard JSON (unofficial, undocumented, free), isolated behind a per-sport adapter so any sport can switch providers without touching eligibility, discovery, or the TV contract.
+**Why:** Desk research on 2026-10-02 found no affordable aggregator covering all seven sports; tennis and cricket were the gaps for every low-cost option checked. This is a strategy choice, not proven coverage.
+**Status:** Validated for NFL only (see `10-sport-integrations/nfl.md`). Coverage, freshness, and ranking quality for other sports remain open per sport. Candidate fallbacks (nflverse, Jolpica, CricketData.org, football-data.org) are unvalidated.
+**Risk:** No service guarantee; ESPN can change or block endpoints. Adapters must report failed or incomplete fetches as such, never as "no events".
+
+## ADR-017 — Engine runtime: Node 24 + TypeScript + SQLite
+**Decision:** The engine is a TypeScript CLI on Node 24 (`tsx`, no build step) in a pnpm workspace, persisting to Node's built-in `node:sqlite` at `data/sportscenter.db`. The TV ↔ engine contract lives in `packages/contracts` (zod schema).
+**Why:** One language across engine and React Native client; no native database dependency; a single file is easy to inspect and back up on the laptop.
+**Note:** One YouTube API key (one Google Cloud project) is used. Keys are not rotated to stretch quota; measured usage is ~11 units per run.
+
 ## Open decisions
 These are unresolved questions, not replacements for accepted ADRs or the current architecture. In particular, ADR-007 and `05-architecture.md` currently assign queue generation and persistent watch state to the engine; a client-owned alternative would require an explicit decision.
 
-- Sports data providers per sport.
+- Per-sport event provider validation beyond NFL (ADR-016), including tennis rankings and cricket series context.
 - Exact YouTube playback integration in RN TV.
-- Engine runtime/database (hosting decided in ADR-014).
 - Exact retry intervals and confidence thresholds.
+- NFL preseason/postseason title formats (not yet observed; currently unmatched by design).
 - Initial preferences beyond NFL (NFL: 49ers, Bills — see `10-sport-integrations/nfl.md`).
 - Whether WWE belongs in V1.
 - Where watch state and queue assembly live for a single-device setup (engine vs TV client).

@@ -30,6 +30,18 @@ Also record:
 
 Count distinct eligible events with at least one correct, trusted, playable highlight in the numerator, not video count; alternate videos for one event must not inflate coverage. Record the observation window, viewer region, and playback environment so metadata checks are distinguishable from playback verified on the target TV.
 
+Report two coverage levels separately:
+- **Metadata-eligible coverage:** distinct eligible events with a correct, trusted, metadata-eligible highlight (API screening only).
+- **Playback-verified coverage:** the subset with a `VERIFIED` target-TV playback observation. Browser checks are recorded as browser evidence only.
+
+Match correctness comes from manual audits (`pnpm review`), recorded per event/video with the method used.
+
+## Observation rules
+- **Prospective vs backfill:** a historical backfill is a baseline, not days of observation. Prospective coverage counts only games first observed before they ended. Report the number of actual observation days, missed runs, and failures.
+- **Incomplete ≠ missing:** failed or incomplete runs are reported as such and never counted as missing highlights.
+- **Latency:** publish delay is reported against estimated end (labelled as an estimate) unless prospective observations bound completion. Time from publish to discovery is limited by run cadence (hourly).
+- **Cohorts:** the all-teams diagnostic cohort is reported separately and never enters the personalized library.
+
 Do not set a final pass percentage before collecting data. Evaluate usefulness by sport: a lower-coverage sport may still be worthwhile if high-priority events are consistently found.
 
 ## Manual benchmark

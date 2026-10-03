@@ -1,0 +1,9 @@
+packages:
+  - engine
+  - packages/*
+
+allowBuilds:
+  esbuild: true
+
+# Flat node_modules keeps the future React Native (Metro) app simple.
+nodeLinker: hoisted

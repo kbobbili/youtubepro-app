@@ -1,0 +1,10 @@
+# Personal preferences. Configuration, not code: edit freely.
+# Teams use ESPN abbreviations; `name` is for readability.
+region: US
+
+sports:
+  nfl:
+    enabled: true
+    teams:
+      - { abbr: SF, name: San Francisco 49ers, priority: high }
+      - { abbr: BUF, name: Buffalo Bills, priority: high }

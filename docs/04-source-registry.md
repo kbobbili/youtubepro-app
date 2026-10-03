@@ -16,18 +16,23 @@ Use where event owner does not provide suitable regional highlights. Examples to
 ### Untrusted
 Never display unknown reupload/fan/piracy channels, lookalike branding, or unclear-rights compilations.
 
-## Registry concept
-```yaml
-- id: nfl-youtube
-  sport: nfl
-  tier: 1
-  platform: youtube
-  channelId: <verified-id>
-  regions: [US]
-  competitions: [NFL]
-  includePatterns: [highlights]
-  excludePatterns: [shorts, interview, press conference]
-```
+## Live registry
+`config/sources.yaml` is the live registry; this document defines its policy. Only entries with `enabled: true` **and** `verification.status: verified` are trusted, scoped by sport, competition, and region. Title include/exclude patterns live in each sport's matcher, not the registry.
+
+## Verification standard
+A source is `verified` only with:
+- authoritative ownership evidence: an official publisher website linking to the channel (or equivalent),
+- the stable channel ID that link resolves to,
+- the evidence URL, verification method, and date,
+- competition and region scope.
+
+Agreement between a handle, channel ID, and RSS title proves identity consistency only, not authorization. Such entries stay `candidate` and disabled. Each matched video's `channelId` is re-checked against the registry at discovery time.
+
+| Source | Status (2026-10-02) | Evidence |
+| --- | --- | --- |
+| NFL `UCDVYQ4Zhbm3S2dlz7P1GBDg` | verified, enabled | nfl.com footer links `youtube.com/user/NFL/`; `channels.list(forUsername=NFL)` resolves to this ID |
+| NBA, MLB, F1, ICC, Tennis TV, 4 Grand Slams, NBC Sports, FIFA, UEFA | candidate, disabled | desk research (handle → ID → RSS title); ownership evidence not yet recorded |
+| Willow | candidate, disabled | ambiguous: two handles resolve to different IDs |
 
 ## Resolver patterns
 - NFL/MLB/NBA/F1: usually league/event → official channel.

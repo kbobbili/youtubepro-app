@@ -5,7 +5,21 @@ Start with `docs/00-product-vision.md`, then the PRD, discovery, and decisions d
 Publisher examples and rights mappings are candidates to validate, not blanket rights claims.
 
 ## Current state
-Documentation only: no application, dependency setup, automated tests, or validated provider/playback integration exists yet. The project is ready to begin validation, not to build or deploy an APK.
+Phase 0 content proof for NFL is running. The engine discovers official NFL highlights for followed teams (49ers, Bills) and writes a spoiler-free library snapshot. Hourly prospective runs started 2026-10-02. No TV app exists yet; target-TV playback is untested.
+
+## Engine commands
+Requires Node 24.19+ and pnpm 11 (`pnpm install`), and a YouTube Data API key in `.env` (see `.env.example`).
+
+```sh
+pnpm discover nfl --days 7               # followed teams; add --all-teams for the diagnostic cohort
+pnpm discover nfl --from 2026-09-24 --to 2026-09-30 --kind backfill
+pnpm report --kind prospective           # coverage, latency, audits, quota
+pnpm snapshot                            # writes data/library.json (TV contract)
+pnpm review <eventId> <videoId> correct  # record a manual match audit
+pnpm test && pnpm typecheck
+```
+
+Hourly runs: `scripts/register-task.ps1` registers a Windows Task Scheduler task running `scripts/run-hourly.ps1` (logs in `data/logs/`).
 
 ## Starting points
 - [Project brief](intro.md) — onboarding context and original assignment.
