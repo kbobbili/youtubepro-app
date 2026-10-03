@@ -12,7 +12,11 @@
     "discover": "tsx engine/src/cli.ts discover",
     "report": "tsx engine/src/cli.ts report",
     "snapshot": "tsx engine/src/cli.ts snapshot",
-    "review": "tsx engine/src/cli.ts audit"
+    "review": "tsx engine/src/cli.ts audit",
+    "catalog": "tsx engine/src/cli.ts catalog",
+    "youtube-login": "tsx engine/src/cli.ts youtube-login",
+    "sync-playlists": "tsx engine/src/cli.ts sync-playlists",
+    "migrate": "tsx engine/src/cli.ts migrate"
   },
   "devDependencies": {
     "@types/node": "^24.19.1",

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -93,4 +94,57 @@ export type Preferences = z.infer<typeof Preferences>;
 
 export function loadPreferences(root = repoRoot()): Preferences {
   return Preferences.parse(parseYaml(fs.readFileSync(path.join(root, 'config', 'preferences.yaml'), 'utf8')));
+}
+
+export const PRIORITY_RANK = { must: 3, high: 2, normal: 1, low: 0 } as const;
+
+// ---- Collections (playlist-delivery experiment) ----------------------------
+
+const CollectionBase = {
+  id: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
+  title: z.string().min(1).max(150),
+  /** Rolling window on event start time. Aging out removes an item from this collection only. */
+  windowDays: z.number().int().min(1).max(366),
+  cap: z.number().int().min(1).max(200),
+  /** Publish to a YouTube playlist. Collections are still computed when false. */
+  publish: z.boolean(),
+};
+
+export const Collection = z.discriminatedUnion('kind', [
+  z.object({ ...CollectionBase, kind: z.literal('mixed'), perSportCaps: z.record(z.string(), z.number().int().min(1)).default({}) }),
+  z.object({ ...CollectionBase, kind: z.literal('sport'), sport: z.string().min(1) }),
+  z.object({ ...CollectionBase, kind: z.literal('team'), sport: z.string().min(1), team: z.string().min(1) }),
+]);
+export type Collection = z.infer<typeof Collection>;
+
+export const PublishingConfig = z.object({
+  /** Publisher budget per Pacific-time quota day; reads and attempted writes both count. */
+  dailyBudgetUnits: z.number().int().min(0),
+  /** Fixed per-collection write cap per run, so one busy collection cannot consume the budget. */
+  writesPerCollectionPerRun: z.number().int().min(0),
+  maxMetadataAgeHours: z.number().positive(),
+  /** Explicit overrides of the title-screen exclusion default; shown in every dry run. */
+  includeFlaggedTitles: z.boolean(),
+  includeUnreviewedTitles: z.boolean(),
+});
+export type PublishingConfig = z.infer<typeof PublishingConfig>;
+
+const CollectionsFile = z.object({ publishing: PublishingConfig, collections: z.array(Collection) });
+export type CollectionsConfig = z.infer<typeof CollectionsFile>;
+
+export function loadCollections(root = repoRoot()): CollectionsConfig {
+  const parsed = CollectionsFile.parse(parseYaml(fs.readFileSync(path.join(root, 'config', 'collections.yaml'), 'utf8')));
+  const ids = new Set<string>();
+  for (const c of parsed.collections) {
+    if (ids.has(c.id)) throw new Error(`Duplicate collection id ${c.id}`);
+    ids.add(c.id);
+  }
+  return parsed;
+}
+
+/** Revision of the configuration a catalog was generated from. */
+export function configRevision(root = repoRoot()): string {
+  const h = createHash('sha256');
+  for (const f of ['collections.yaml', 'preferences.yaml', 'sources.yaml']) h.update(fs.readFileSync(path.join(root, 'config', f)));
+  return h.digest('hex').slice(0, 12);
 }

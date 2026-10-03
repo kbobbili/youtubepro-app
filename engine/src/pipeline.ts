@@ -3,6 +3,7 @@ import { ESTIMATED_GAME_DURATION_MS, matchNflCandidate, parseNflHighlightTitle }
 import { trustedSources, type Preferences, type Source } from './config.ts';
 import type { Cohort, DiscoveryStatus, RunIssue, RunKind, RunStatus, SportEvent, Window } from './domain.ts';
 import type { Transport } from './http.ts';
+import { recordMetadataChecks } from './revalidate.ts';
 import type { Store } from './store.ts';
 import { parseIsoDuration, QuotaExceededError, type UploadItem, type UploadScan, type VideoMetadata, YouTubeClient } from './youtube/client.ts';
 import { screenVideo } from './youtube/screen.ts';
@@ -136,6 +137,8 @@ export async function discoverNfl(o: DiscoverOptions): Promise<DiscoverResult> {
   const now = o.now();
   const outcomes: EventOutcome[] = [];
   store.tx(() => {
+    // Every looked-up candidate gets a metadata check and title screen, so 'unreviewed' exists only transiently.
+    if (metadataOk && ids.length) recordMetadataChecks(store, ids, metadata, o.prefs.region, () => 'nfl', now);
     for (const e of tracked) {
       if (e.status !== 'COMPLETED') {
         outcomes.push({ event: e, discovery: 'WAITING_FOR_EVENT_END', matchedCandidates: 0, ineligibleReasons: [], scanComplete: true });

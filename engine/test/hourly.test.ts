@@ -22,19 +22,25 @@ describe.skipIf(process.platform !== 'win32')('hourly chain (fail closed)', () =
   it('runs the personal chain, then the diagnostic, and exits 0 when all succeed', () => {
     const r = simulate([]);
     expect(r.code).toBe(0);
-    expect(r.steps).toEqual(['discover', 'snapshot', 'diagnostic']);
+    expect(r.steps).toEqual(['discover', 'snapshot', 'catalog', 'diagnostic']);
   });
 
   it('a failed or incomplete discover stops every later step and exits non-zero', () => {
     const r = simulate(['discover']);
     expect(r.code).toBe(3);
     expect(r.steps).toEqual(['discover']);
-    expect(r.log).toMatch(/CHAIN STOPPED: \[discover\] exit=3; skipped: snapshot, diagnostic/);
+    expect(r.log).toMatch(/CHAIN STOPPED: \[discover\] exit=3; skipped: snapshot, catalog, diagnostic/);
+  });
+
+  it('an incomplete catalog stops the chain (publishing, once added, would never see it)', () => {
+    const r = simulate(['catalog']);
+    expect(r.code).toBe(3);
+    expect(r.steps).toEqual(['discover', 'snapshot', 'catalog']);
   });
 
   it('a diagnostic-only failure never blocks the personal chain', () => {
     const r = simulate(['diagnostic']);
     expect(r.code).toBe(0);
-    expect(r.steps).toEqual(['discover', 'snapshot', 'diagnostic']);
+    expect(r.steps).toEqual(['discover', 'snapshot', 'catalog', 'diagnostic']);
   });
 });

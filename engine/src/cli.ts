@@ -2,25 +2,36 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { loadEnv, loadPreferences, loadSources, repoRoot, youtubeApiKey } from './config.ts';
+import { CatalogSnapshot } from '@sportscenter/contracts';
+import { generateCatalog, writeCatalog } from './catalog.ts';
+import { configRevision, loadCollections, loadEnv, loadPreferences, loadSources, repoRoot, youtubeApiKey } from './config.ts';
 import type { Cohort, RunKind, Window } from './domain.ts';
 import { liveTransport, recordingTransport, replayTransport, type Transport } from './http.ts';
 import { discoverNfl, type DiscoverResult } from './pipeline.ts';
+import { syncPlaylists, type SyncReport } from './publish/youtube-playlists.ts';
 import { buildReport } from './report.ts';
 import { buildSnapshot, writeSnapshot } from './snapshot.ts';
 import { Store } from './store.ts';
 import { YouTubeClient } from './youtube/client.ts';
+import { authorizedTransport, login, oauthClientFromEnv, TokenProvider } from './youtube/oauth.ts';
 
 const USAGE = `Usage:
   pnpm discover nfl [--days 7 | --from YYYY-MM-DD --to YYYY-MM-DD] [--all-teams] [--kind manual|prospective|backfill]
                     [--record DIR | --replay DIR] [--now ISO] [--db FILE]
   pnpm report [--cohort personal|diagnostic] [--kind all|prospective|backfill|manual] [--json]
   pnpm snapshot [--days 7] [--out FILE]
+  pnpm catalog [--out FILE] [--offline]
+  pnpm youtube-login
+  pnpm sync-playlists [--apply] [--catalog FILE] [--retry-create COLLECTION] [--json]
+  pnpm migrate [--db FILE]
   pnpm review <eventId> <videoId> correct|wrong [--notes TEXT]
   pnpm review --playback <videoId> verified|failed --env target-tv|browser [--notes TEXT]`;
 
 const root = repoRoot();
 const dataDir = path.join(root, 'data');
+const tokenFile = path.join(dataDir, 'secrets', 'youtube-token.json');
+/** One lock for every writer (discovery, catalog revalidation, publishing, migration), so they are serialized. */
+const ENGINE_LOCK = 'engine';
 
 function resolveWindow(v: { days?: string; from?: string; to?: string }, now: string): Window {
   if (v.from || v.to) {
@@ -88,6 +99,24 @@ function printDiscover(r: DiscoverResult, cohort: Cohort): void {
   for (const i of r.issues) console.log(`ISSUE [${i.stage}] ${i.message}`);
 }
 
+function printSync(r: SyncReport, catalog: CatalogSnapshot): void {
+  const label = new Map(catalog.collections.flatMap((c) => c.items.map((i) => [i.video.videoId, `${i.neutralTitle} (${i.subtitle}, ${i.eventStartTime.slice(0, 10)})`])));
+  console.log(`Publish run ${r.runId}  mode=${r.mode.toUpperCase()}  status=${r.status.toUpperCase()}  channel=${r.channelId ?? '?'}`);
+  console.log(`Catalog generated ${r.catalogGeneratedAt}; title overrides: flagged=${r.titleOverrides.includeFlaggedTitles} unreviewed=${r.titleOverrides.includeUnreviewedTitles}`);
+  for (const c of r.collections) {
+    console.log('');
+    console.log(`[${c.collectionId}] ${c.outcome}${c.playlistId ? `  playlist=${c.playlistId}` : ''}  desired=${c.desired}`);
+    console.log(`  planned: ${c.planned.deletes} delete, ${c.planned.moves} move (drift), ${c.planned.inserts} insert;  applied: ${c.applied.creates} create, ${c.applied.deletes} delete, ${c.applied.moves} move, ${c.applied.inserts} insert;  backlog ${c.backlog}`);
+    if (Object.keys(c.exclusions).length) console.log(`  excluded: ${Object.entries(c.exclusions).map(([k, n]) => `${k}=${n}`).join(', ')}`);
+    for (const op of c.ops) console.log(`  ${op.kind.padEnd(6)} ${op.kind === 'delete' ? `${op.videoId} (${op.reason})` : `@${op.position} ${op.videoId}  ${label.get(op.videoId) ?? ''}`}`);
+    for (const n of c.notes) console.log(`  note: ${n}`);
+  }
+  console.log('');
+  console.log(`Quota: ${JSON.stringify(r.calls)} = ${r.units} units this run; day ${r.quotaDay}: budget ${r.budget.daily}, used before ${r.budget.usedBefore}, remaining ${r.budget.remainingAfter} (~${r.budget.remainingWrites} writes)`);
+  if (r.mode === 'dry-run') console.log('Dry run: no remote changes were made. Re-run with --apply to publish (writes capped per collection per run).');
+  for (const i of r.issues) console.log(`ISSUE ${i}`);
+}
+
 async function main(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
   const { values, positionals } = parseArgs({
@@ -98,6 +127,7 @@ async function main(argv: string[]): Promise<number> {
       'all-teams': { type: 'boolean' }, kind: { type: 'string' }, cohort: { type: 'string' },
       record: { type: 'string' }, replay: { type: 'string' }, now: { type: 'string' }, db: { type: 'string' },
       out: { type: 'string' }, json: { type: 'boolean' }, notes: { type: 'string' }, playback: { type: 'string' }, env: { type: 'string' },
+      offline: { type: 'boolean' }, apply: { type: 'boolean' }, catalog: { type: 'string' }, 'retry-create': { type: 'string', multiple: true },
     },
   });
   const now = () => values.now ?? new Date().toISOString();
@@ -120,7 +150,7 @@ async function main(argv: string[]): Promise<number> {
         transport = values.record ? recordingTransport(liveTransport(), path.resolve(values.record)) : liveTransport();
       }
       const window = resolveWindow(values, now());
-      return withLock('discover', async () => {
+      return withLock(ENGINE_LOCK, async () => {
         const store = new Store(dbFile);
         try {
           const result = await discoverNfl({
@@ -168,6 +198,59 @@ async function main(argv: string[]): Promise<number> {
         store.close();
       }
     }
+    case 'migrate': {
+      return withLock(ENGINE_LOCK, async () => {
+        const r = Store.migrateFile(dbFile, path.join(path.dirname(dbFile), 'backups'), now());
+        if (r.from === r.to) console.log(`Schema already at v${r.to}; nothing to do.`);
+        else console.log(`Migrated v${r.from} → v${r.to}; integrity and foreign keys verified.${r.backup ? ` Backup: ${path.relative(root, r.backup)}` : ''}`);
+        return 0;
+      });
+    }
+    case 'catalog': {
+      return withLock(ENGINE_LOCK, async () => {
+        const store = new Store(dbFile);
+        try {
+          const youtube = values.offline ? undefined : new YouTubeClient(liveTransport(), youtubeApiKey());
+          const { catalog, revalidation } = await generateCatalog(store, youtube, {
+            prefs: loadPreferences(root), sources: loadSources(root), collections: loadCollections(root), now: now(), configRevision: configRevision(root),
+          });
+          const out = values.out ?? path.join(dataDir, 'catalog.json');
+          writeCatalog(out, catalog);
+          console.log(`Wrote catalog to ${path.relative(root, out)} (config ${catalog.configRevision}); metadata refreshed for ${revalidation.refreshed.length} video(s)${youtube ? ` using ${youtube.ledger.units} YouTube unit(s)` : ''}`);
+          for (const c of catalog.collections) {
+            console.log(`  [${c.id}]${c.publish ? ' publish' : ''} ${c.status.toUpperCase()}  ${c.items.length} item(s), ${c.exclusions.length} excluded, window from ${c.window.start.slice(0, 10)}, stored history from ${c.coverage.storedHistoryFrom?.slice(0, 10) ?? '-'}`);
+            for (const i of c.issues) console.log(`    issue: ${i}`);
+          }
+          return catalog.collections.every((c) => c.status === 'complete') ? 0 : 3;
+        } finally {
+          store.close();
+        }
+      });
+    }
+    case 'youtube-login': {
+      const { scope } = await login(oauthClientFromEnv(), tokenFile);
+      console.log(`Authorized (scope: ${scope}). Refresh token stored in ${path.relative(root, tokenFile)} (gitignored).`);
+      return 0;
+    }
+    case 'sync-playlists': {
+      return withLock(ENGINE_LOCK, async () => {
+        const catalogFile = values.catalog ?? path.join(dataDir, 'catalog.json');
+        const catalog = CatalogSnapshot.parse(JSON.parse(fs.readFileSync(catalogFile, 'utf8')));
+        const store = new Store(dbFile);
+        try {
+          const report = await syncPlaylists({
+            store, transport: authorizedTransport(new TokenProvider(oauthClientFromEnv(), tokenFile)), catalog, config: loadCollections(root),
+            apply: values.apply ?? false, runId: `pub-${now().slice(0, 19).replace(/[:T]/g, '')}-${randomUUID().slice(0, 8)}`, now,
+            newInstallId: () => randomUUID(), retryCreate: values['retry-create'],
+          });
+          if (values.json) console.log(JSON.stringify(report, null, 2));
+          else printSync(report, catalog);
+          return report.status === 'ok' ? 0 : report.status === 'failed' ? 2 : 3;
+        } finally {
+          store.close();
+        }
+      });
+    }
     case 'audit': {
       const store = new Store(dbFile);
       try {
@@ -193,10 +276,14 @@ async function main(argv: string[]): Promise<number> {
   }
 }
 
+// Set exitCode and let the process end on its own: on Node 24 for Windows, process.exit() right after a
+// fetch aborts with a libuv assertion (UV_HANDLE_CLOSING, 0xC0000409), which the hourly chain reads as failure.
 main(process.argv.slice(2)).then(
-  (code) => process.exit(code),
+  (code) => {
+    process.exitCode = code;
+  },
   (err) => {
     console.error(`Error: ${(err as Error).message}`);
-    process.exit(1);
+    process.exitCode = 1;
   },
 );

@@ -45,7 +45,11 @@ function Invoke-Step([string]$name, [string[]]$engineArgs) {
 # Personal chain, in dependency order. Downstream steps run only when every upstream step succeeded.
 $personal = @(
   @{ name = 'discover'; args = @('discover', 'nfl', '--days', '7', '--kind', 'prospective') },
-  @{ name = 'snapshot'; args = @('snapshot') }
+  @{ name = 'snapshot'; args = @('snapshot') },
+  # Catalog revalidates retained videos (YouTube API key) and exits 3 if any collection is incomplete.
+  @{ name = 'catalog'; args = @('catalog') }
+  # sync-playlists --apply is added only after an inspected dry run, manual apply, the Onn device gate,
+  # and a zero-change second apply (docs/08-validation-plan.md).
 )
 $diagnostic = @{ name = 'diagnostic'; args = @('discover', 'nfl', '--days', '7', '--kind', 'prospective', '--all-teams') }
 

@@ -3,7 +3,8 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { Cohort, DiscoveryStatus, RunIssue, RunKind, RunStatus, SportEvent, Window } from './domain.ts';
 
-const SCHEMA = `
+/** v1: the original NFL discovery schema (IF NOT EXISTS adopts databases created before versioning). */
+const SCHEMA_V1 = `
 CREATE TABLE IF NOT EXISTS runs (
   id TEXT PRIMARY KEY,
   sport TEXT NOT NULL,
@@ -117,6 +118,107 @@ CREATE TABLE IF NOT EXISTS match_audits (
 );
 `;
 
+/** v2: playlist-publishing experiment — install identity, metadata revalidation, title screening, publish state. */
+const SCHEMA_V2 = `
+CREATE TABLE engine_meta (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
+-- Latest metadata check per video, from discovery or catalog revalidation.
+-- available = 0 only when videos.list succeeded and omitted the video (confirmed removal), never on a failed fetch.
+CREATE TABLE video_checks (
+  video_id TEXT PRIMARY KEY,
+  checked_at TEXT NOT NULL,
+  available INTEGER NOT NULL,
+  channel_id TEXT,
+  title TEXT,
+  title_fingerprint TEXT,
+  screen_reasons_json TEXT NOT NULL
+);
+
+-- Title spoiler heuristic per video, valid for one title fingerprint and screening version.
+-- 'unflagged' means the heuristic found no warning, not that the title is proven spoiler-safe.
+CREATE TABLE title_screens (
+  video_id TEXT PRIMARY KEY,
+  title_fingerprint TEXT NOT NULL,
+  screening_version INTEGER NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('flagged','unflagged','unreviewed')),
+  reasons_json TEXT NOT NULL,
+  screened_at TEXT NOT NULL
+);
+
+-- Engine-owned playlists. Never adopted by title; owner channel and install marker are tracked.
+CREATE TABLE publish_playlists (
+  collection_id TEXT PRIMARY KEY,
+  playlist_id TEXT,
+  channel_id TEXT NOT NULL,
+  install_id TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('creating','active','unresolved','conflict')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- One row per publisher run. units counts attempted calls (succeeded or not), updated as each call is made.
+CREATE TABLE publish_runs (
+  id TEXT PRIMARY KEY,
+  started_at TEXT NOT NULL,
+  finished_at TEXT,
+  quota_day TEXT NOT NULL,
+  mode TEXT NOT NULL CHECK (mode IN ('dry-run','apply')),
+  status TEXT CHECK (status IN ('ok','incomplete','failed','budget_limited')),
+  catalog_generated_at TEXT,
+  calls_json TEXT NOT NULL DEFAULT '{}',
+  units INTEGER NOT NULL DEFAULT 0,
+  summary_json TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX publish_runs_quota_day ON publish_runs (quota_day);
+`;
+
+/** Sequential migrations: MIGRATIONS[i] upgrades user_version i → i+1. Append only; never edit a shipped entry. */
+export const MIGRATIONS: readonly string[] = [SCHEMA_V1, SCHEMA_V2];
+
+export class SchemaOutdatedError extends Error {}
+
+export function userVersion(db: DatabaseSync): number {
+  return (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
+}
+
+export function verifyIntegrity(db: DatabaseSync): void {
+  const integrity = db.prepare('PRAGMA integrity_check').all() as { integrity_check: string }[];
+  if (integrity.length !== 1 || integrity[0]!.integrity_check !== 'ok') throw new Error(`integrity_check failed: ${JSON.stringify(integrity)}`);
+  const fk = db.prepare('PRAGMA foreign_key_check').all();
+  if (fk.length) throw new Error(`foreign_key_check failed: ${fk.length} violation(s)`);
+}
+
+/**
+ * Apply pending migrations, each in its own transaction (user_version is set inside it, so an
+ * interrupted migration rolls back cleanly), then verify integrity and foreign keys.
+ */
+export function migrate(db: DatabaseSync, migrations: readonly string[] = MIGRATIONS): { from: number; to: number } {
+  const from = userVersion(db);
+  if (from > migrations.length) throw new Error(`Database schema v${from} is newer than this engine (v${migrations.length}); run the matching engine version`);
+  for (let v = from; v < migrations.length; v++) {
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.exec(migrations[v]!);
+      db.exec(`PRAGMA user_version = ${v + 1}`);
+      db.exec('COMMIT');
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw new Error(`Migration to v${v + 1} failed and was rolled back: ${(err as Error).message}`);
+    }
+  }
+  verifyIntegrity(db);
+  return { from, to: userVersion(db) };
+}
+
+export interface MigrationResult {
+  from: number;
+  to: number;
+  backup?: string;
+}
+
 export interface CandidateRow {
   eventId: string;
   videoId: string;
@@ -134,11 +236,50 @@ export interface CandidateRow {
 export class Store {
   readonly db: DatabaseSync;
 
+  /**
+   * A file database is never migrated implicitly: an outdated schema throws SchemaOutdatedError, so
+   * scheduled jobs fail closed until `pnpm migrate` (backup, migrate, verify under the engine lock) runs.
+   * In-memory databases (tests) are always migrated.
+   */
   constructor(file: string) {
     if (file !== ':memory:') fs.mkdirSync(path.dirname(file), { recursive: true });
     this.db = new DatabaseSync(file);
-    this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
-    this.db.exec(SCHEMA);
+    this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
+    if (file === ':memory:') migrate(this.db);
+    else if (userVersion(this.db) !== MIGRATIONS.length) {
+      const v = userVersion(this.db);
+      this.db.close();
+      throw new SchemaOutdatedError(`Database schema is v${v}, engine expects v${MIGRATIONS.length}; run \`pnpm migrate\``);
+    }
+  }
+
+  /**
+   * Back up with VACUUM INTO (SQLite-consistent, never a raw copy of a live WAL file), verify the backup,
+   * then migrate and verify. The caller must hold the engine lock so no scheduled writer runs concurrently.
+   */
+  static migrateFile(file: string, backupDir: string, now: string, migrations: readonly string[] = MIGRATIONS): MigrationResult {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const db = new DatabaseSync(file);
+    try {
+      db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
+      const from = userVersion(db);
+      if (from === migrations.length) return { from, to: from };
+      let backup: string | undefined;
+      if ((db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table'").get() as { n: number }).n > 0) {
+        fs.mkdirSync(backupDir, { recursive: true });
+        backup = path.join(backupDir, `${path.basename(file, '.db')}-v${from}-${now.replace(/[:.]/g, '')}.db`);
+        db.exec(`VACUUM INTO '${backup.replace(/'/g, "''")}'`);
+        const check = new DatabaseSync(backup, { readOnly: true });
+        try {
+          verifyIntegrity(check);
+        } finally {
+          check.close();
+        }
+      }
+      return { ...migrate(db, migrations), backup };
+    } finally {
+      db.close();
+    }
   }
 
   close(): void {
@@ -281,4 +422,112 @@ export class Store {
       .prepare('INSERT OR REPLACE INTO match_audits (event_id, video_id, verdict, audited_at, notes) VALUES (?,?,?,?,?)')
       .run(eventId, videoId, verdict, at, notes ?? null);
   }
+
+  // ---- v2: revalidation, title screening, publishing ------------------------
+
+  /** Stable engine install ID, durably created on first use (before any remote creation relies on it). */
+  installId(create: () => string): string {
+    this.db.prepare("INSERT OR IGNORE INTO engine_meta (key, value) VALUES ('install_id', ?)").run(create());
+    return (this.db.prepare("SELECT value FROM engine_meta WHERE key = 'install_id'").get() as { value: string }).value;
+  }
+
+  /** Record a successful metadata lookup. `available: false` only for confirmed removal (absent from a successful videos.list). */
+  recordVideoCheck(c: VideoCheck): void {
+    this.db
+      .prepare(
+        `INSERT INTO video_checks (video_id, checked_at, available, channel_id, title, title_fingerprint, screen_reasons_json) VALUES (?,?,?,?,?,?,?)
+         ON CONFLICT(video_id) DO UPDATE SET checked_at = excluded.checked_at, available = excluded.available, channel_id = excluded.channel_id,
+           title = excluded.title, title_fingerprint = excluded.title_fingerprint, screen_reasons_json = excluded.screen_reasons_json`,
+      )
+      .run(c.videoId, c.checkedAt, c.available ? 1 : 0, c.channelId ?? null, c.title ?? null, c.titleFingerprint ?? null, JSON.stringify(c.screenReasons));
+  }
+
+  videoCheck(videoId: string): VideoCheck | undefined {
+    const r = this.db.prepare('SELECT * FROM video_checks WHERE video_id = ?').get(videoId) as
+      | { video_id: string; checked_at: string; available: number; channel_id: string | null; title: string | null; title_fingerprint: string | null; screen_reasons_json: string }
+      | undefined;
+    return (
+      r && {
+        videoId: r.video_id, checkedAt: r.checked_at, available: r.available === 1, channelId: r.channel_id ?? undefined,
+        title: r.title ?? undefined, titleFingerprint: r.title_fingerprint ?? undefined, screenReasons: JSON.parse(r.screen_reasons_json),
+      }
+    );
+  }
+
+  recordTitleScreen(s: { videoId: string; titleFingerprint: string; version: number; status: string; reasons: string[]; at: string }): void {
+    this.db
+      .prepare(
+        `INSERT INTO title_screens (video_id, title_fingerprint, screening_version, status, reasons_json, screened_at) VALUES (?,?,?,?,?,?)
+         ON CONFLICT(video_id) DO UPDATE SET title_fingerprint = excluded.title_fingerprint, screening_version = excluded.screening_version,
+           status = excluded.status, reasons_json = excluded.reasons_json, screened_at = excluded.screened_at`,
+      )
+      .run(s.videoId, s.titleFingerprint, s.version, s.status, JSON.stringify(s.reasons), s.at);
+  }
+
+  titleScreen(videoId: string): { titleFingerprint: string; version: number; status: 'flagged' | 'unflagged' | 'unreviewed'; reasons: string[] } | undefined {
+    const r = this.db.prepare('SELECT title_fingerprint, screening_version, status, reasons_json FROM title_screens WHERE video_id = ?').get(videoId) as
+      | { title_fingerprint: string; screening_version: number; status: 'flagged' | 'unflagged' | 'unreviewed'; reasons_json: string }
+      | undefined;
+    return r && { titleFingerprint: r.title_fingerprint, version: r.screening_version, status: r.status, reasons: JSON.parse(r.reasons_json) };
+  }
+
+  publishPlaylist(collectionId: string): PublishPlaylist | undefined {
+    const r = this.db.prepare('SELECT * FROM publish_playlists WHERE collection_id = ?').get(collectionId) as
+      | { collection_id: string; playlist_id: string | null; channel_id: string; install_id: string; state: PublishPlaylist['state'] }
+      | undefined;
+    return r && { collectionId: r.collection_id, playlistId: r.playlist_id ?? undefined, channelId: r.channel_id, installId: r.install_id, state: r.state };
+  }
+
+  setPublishPlaylist(p: PublishPlaylist, at: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO publish_playlists (collection_id, playlist_id, channel_id, install_id, state, created_at, updated_at) VALUES (?,?,?,?,?,?,?)
+         ON CONFLICT(collection_id) DO UPDATE SET playlist_id = excluded.playlist_id, channel_id = excluded.channel_id,
+           install_id = excluded.install_id, state = excluded.state, updated_at = excluded.updated_at`,
+      )
+      .run(p.collectionId, p.playlistId ?? null, p.channelId, p.installId, p.state, at, at);
+  }
+
+  deletePublishPlaylist(collectionId: string): void {
+    this.db.prepare('DELETE FROM publish_playlists WHERE collection_id = ?').run(collectionId);
+  }
+
+  startPublishRun(r: { id: string; startedAt: string; quotaDay: string; mode: 'dry-run' | 'apply'; catalogGeneratedAt?: string }): void {
+    this.db
+      .prepare('INSERT INTO publish_runs (id, started_at, quota_day, mode, catalog_generated_at) VALUES (?,?,?,?,?)')
+      .run(r.id, r.startedAt, r.quotaDay, r.mode, r.catalogGeneratedAt ?? null);
+  }
+
+  /** Persisted before each request is sent, so crashed runs still count their attempted calls. */
+  recordPublishCalls(runId: string, calls: Record<string, number>, units: number): void {
+    this.db.prepare('UPDATE publish_runs SET calls_json = ?, units = ? WHERE id = ?').run(JSON.stringify(calls), units, runId);
+  }
+
+  finishPublishRun(runId: string, finishedAt: string, status: 'ok' | 'incomplete' | 'failed' | 'budget_limited', summary: unknown): void {
+    this.db.prepare('UPDATE publish_runs SET finished_at = ?, status = ?, summary_json = ? WHERE id = ?').run(finishedAt, status, JSON.stringify(summary), runId);
+  }
+
+  /** Units attempted by all publisher runs on a Pacific-time quota day. */
+  publishUnitsOn(quotaDay: string): number {
+    return (this.db.prepare('SELECT COALESCE(SUM(units), 0) AS n FROM publish_runs WHERE quota_day = ?').get(quotaDay) as { n: number }).n;
+  }
+}
+
+export interface VideoCheck {
+  videoId: string;
+  checkedAt: string;
+  available: boolean;
+  channelId?: string;
+  title?: string;
+  titleFingerprint?: string;
+  screenReasons: string[];
+}
+
+export interface PublishPlaylist {
+  collectionId: string;
+  playlistId?: string;
+  channelId: string;
+  installId: string;
+  /** creating: insert sent, outcome not yet confirmed. unresolved: lookup found nothing after an uncertain create. conflict: duplicate markers. */
+  state: 'creating' | 'active' | 'unresolved' | 'conflict';
 }

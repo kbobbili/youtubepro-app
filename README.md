@@ -16,6 +16,10 @@ pnpm discover nfl --from 2026-09-24 --to 2026-09-30 --kind backfill
 pnpm report --kind prospective           # coverage, latency, audits, quota
 pnpm snapshot                            # writes data/library.json (TV contract)
 pnpm review <eventId> <videoId> correct  # record a manual match audit
+pnpm migrate                             # back up, then upgrade the database schema (required after upgrades)
+pnpm catalog                             # writes data/catalog.json (collections; revalidates retained videos)
+pnpm youtube-login                       # one-time OAuth for the playlist experiment
+pnpm sync-playlists [--apply]            # dry run by default; see docs/08 (SmartTube experiment)
 pnpm test && pnpm typecheck
 ```
 
