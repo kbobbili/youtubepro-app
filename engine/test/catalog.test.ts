@@ -7,7 +7,8 @@ import { recordMetadataChecks } from '../src/revalidate.ts';
 import { Store } from '../src/store.ts';
 import type { VideoMetadata } from '../src/youtube/client.ts';
 import { YouTubeClient } from '../src/youtube/client.ts';
-import { w3Transport } from './helpers.ts';
+import { buildSnapshot } from '../src/snapshot.ts';
+import { fixtureTransport, W3, w3Transport } from './helpers.ts';
 
 const root = repoRoot();
 const sources = loadSources(root);
@@ -184,11 +185,26 @@ describe('catalog', () => {
     expect(vids(unfollowed, 'nfl')).toEqual([]);
   });
 
-  it('reports embedding-disabled exclusions separately', () => {
+  it('includes embedding-disabled videos (SmartTube plays them) but still excludes private ones', () => {
     const store = new Store(':memory:');
     okRun(store);
     const v = seed(store, { start: daysAgo(2), home: 'BUF', away: 'LAC', status: { embeddable: false } });
-    expect(col(buildCatalog(store, options()), 'nfl').exclusions).toEqual([{ eventId: v.eventId, videoId: v.videoId, reason: 'embedding_disabled' }]);
+    const p = seed(store, { start: daysAgo(3), home: 'SF', away: 'ARI', status: { privacyStatus: 'private' } });
+    const c = col(buildCatalog(store, options()), 'nfl');
+    expect(c.items.map((i) => i.video.videoId)).toEqual([v.videoId]);
+    expect(c.exclusions).toEqual([{ eventId: p.eventId, videoId: p.videoId, reason: 'metadata:not_public:private' }]);
+  });
+
+  it('end to end: an embedding-disabled highlight is FOUND and catalogued, but stays out of the TV library export', async () => {
+    const store = new Store(':memory:');
+    const t = fixtureTransport(W3, (v) => (v.id === 'v__pg6qIYL4' ? { ...v, status: { ...(v as unknown as { status: object }).status, embeddable: false } } : v));
+    const r = await discoverNfl({
+      store, eventsTransport: t, youtube: new YouTubeClient(t, 'test'), sources, prefs, window: { start: '2026-09-24T00:00:00.000Z', end: '2026-10-01T00:00:00.000Z' },
+      cohort: 'personal', kind: 'backfill', runId: 'w3-embed', now: () => '2026-10-03T02:30:00.000Z',
+    });
+    expect(r.outcomes.map((o) => o.discovery)).toEqual(['FOUND', 'FOUND']);
+    expect(vids(buildCatalog(store, { ...options(), now: '2026-10-03T02:30:00.000Z' }), 'nfl')).toEqual(['v__pg6qIYL4', '7ngu-tT0PQs']);
+    expect(buildSnapshot(store, prefs, sources, '2026-10-03T02:30:00.000Z').items.map((i) => i.video.videoId)).toEqual(['7ngu-tT0PQs']);
   });
 
   it('distinguishes a complete empty collection from incomplete input', () => {
@@ -198,6 +214,14 @@ describe('catalog', () => {
     expect(buildCatalog(store, options()).collections.every((c) => c.status === 'complete' && c.items.length === 0)).toBe(true);
     okRun(store, 'incomplete');
     expect(col(buildCatalog(store, options()), 'nfl').issues[0]).toMatch(/latest personal discovery run .* is incomplete/);
+  });
+
+  it('a sport whose discovery stopped running is incomplete, so its playlists keep last-known-good', () => {
+    const store = new Store(':memory:');
+    store.startRun({ id: 'old', sport: 'nfl', cohort: 'personal', kind: 'prospective', startedAt: daysAgo(0, 7), window: { start: daysAgo(7), end: NOW }, config: {} });
+    store.finishRun('old', daysAgo(0, 7), 'ok', [], {});
+    expect(col(buildCatalog(store, options()), 'nfl')).toMatchObject({ status: 'incomplete', issues: [expect.stringMatching(/older than 6h/)] });
+    expect(col(buildCatalog(store, options({ publishing: { maxDiscoveryAgeHours: 8 } })), 'nfl').status).toBe('complete');
   });
 
   it('end to end from recorded Week 3 discovery: screened, neutral, no publisher titles', async () => {

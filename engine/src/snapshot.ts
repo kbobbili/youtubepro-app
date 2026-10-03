@@ -38,6 +38,8 @@ export function buildSnapshot(store: Store, prefs: Preferences, sources: Source[
        JOIN events e ON e.id = h.event_id
        JOIN discovery d ON d.event_id = h.event_id AND d.status = 'FOUND'
        JOIN candidates c ON c.event_id = h.event_id AND c.video_id = h.video_id AND c.metadata_eligible = 1
+         -- The v1 TV contract means "embeddable": embed-only reasons no longer block eligibility, so filter them here.
+         AND c.metadata_reasons_json NOT LIKE '%embedd%'
        WHERE e.sport = 'nfl' AND e.start_time >= ? AND e.start_time <= ?
        ORDER BY e.start_time DESC, e.id`,
     )

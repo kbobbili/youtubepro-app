@@ -221,7 +221,9 @@ async function main(argv: string[]): Promise<number> {
             console.log(`  [${c.id}]${c.publish ? ' publish' : ''} ${c.status.toUpperCase()}  ${c.items.length} item(s), ${c.exclusions.length} excluded, window from ${c.window.start.slice(0, 10)}, stored history from ${c.coverage.storedHistoryFrom?.slice(0, 10) ?? '-'}`);
             for (const i of c.issues) console.log(`    issue: ${i}`);
           }
-          return catalog.collections.every((c) => c.status === 'complete') ? 0 : 3;
+          // A valid catalog is success even with incomplete collections: the publisher skips those one by one,
+          // so one sport's failure never blocks the others. Only a failure to build the catalog exits non-zero.
+          return 0;
         } finally {
           store.close();
         }

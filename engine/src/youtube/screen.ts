@@ -10,6 +10,14 @@ export interface ScreenResult {
   reasons: string[];
 }
 
+/**
+ * Reasons that only matter to an embedded player (the planned RN TV client). SmartTube plays these videos,
+ * so discovery and the catalog ignore them (user decision 2026-10-03); the v1 library export still excludes them.
+ */
+export const EMBED_ONLY_REASONS: ReadonlySet<string> = new Set(['embedding_disabled', 'embeddable_unknown']);
+
+export const blocksPlayback = (reason: string) => !EMBED_ONLY_REASONS.has(reason);
+
 export function screenVideo(video: VideoMetadata | undefined, region: string): ScreenResult {
   if (!video) return { eligible: false, reasons: ['video_unavailable'] };
   const reasons: string[] = [];

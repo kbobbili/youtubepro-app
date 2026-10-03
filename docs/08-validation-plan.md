@@ -67,7 +67,7 @@ Experimental and under evaluation (open decision in `07-decisions.md`); it does 
 **What screening does and does not establish:**
 - Title screening is a heuristic (`unflagged` = no warning found). It does not establish the spoiler-free requirement, and it does not check thumbnails, durations, or indirect result language.
 - Metadata screening is not playback evidence. Record device playback with `pnpm review --playback <videoId> verified|failed --env target-tv`.
-- The `embeddable === true` rule is inherited from the in-app player and stays fail-closed; embedding-disabled exclusions are reported separately because SmartTube may play those videos.
+- Embedding-disabled videos are eligible for discovery and collections, because SmartTube does not embed (user decision 2026-10-03). The v1 library export, whose contract means "embeddable", still excludes them.
 
 **Onn gate (required before multi-sport expansion and before adding `sync-playlists --apply` to the hourly job):**
 1. Inspected dry run, then a manual `--apply` of the single `nfl` collection.
@@ -77,7 +77,9 @@ Experimental and under evaluation (open decision in `07-decisions.md`); it does 
 5. A second `--apply` against unchanged input makes zero changes.
 6. Record the SmartTube version and settings, and every limitation, in the log below. If the delivery path fails the experiment's needs, resolve that before expansion; do not relax the spoiler-free requirement silently.
 
-**Accepted temporary limitation:** all personal sports share one all-or-nothing hourly chain, so one incomplete sport blocks publishing for every collection. This is not independent per-sport refresh.
+**Failure isolation (per collection, 2026-10-03):** each sport's discovery runs independently. A failed, incomplete or stopped discovery (latest run older than `maxDiscoveryAgeHours`) marks only that sport's collections, and mixed collections containing it, incomplete; the publisher keeps those playlists as last-known-good and still updates healthy ones. Only a catalog that fails to build blocks publishing. Any failed step makes the hourly run exit non-zero.
+
+**Publish budget:** a safety rail at 8,000 of the project's default 10,000 daily units, reserving headroom for discovery, rather than a throttle.
 
 **Device log:** _no observations yet._
 

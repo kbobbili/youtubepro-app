@@ -1,15 +1,17 @@
 # Hourly SportsCenter run. Registered with Windows Task Scheduler by scripts/register-task.ps1.
 # Overlap is prevented by the engine's lock file.
 #
-# Fail-closed chain: the personal pipeline runs in order and stops at the first step that exits non-zero
-# (discover exits 2 = failed, 3 = incomplete). Later steps never run on incomplete input, and the script
-# exits non-zero so Task Scheduler records the failure. This is all-or-nothing across personal sports:
-# one incomplete sport blocks every downstream step (an accepted temporary limitation, not per-sport refresh).
-# The NFL all-teams diagnostic is measurement only: it runs after the personal chain succeeds and its
-# failure is logged but never changes the exit code.
+# Failure isolation is per collection, not all-or-nothing:
+# - Each sport's discovery runs independently; a failed or incomplete run is logged and the chain continues.
+#   The catalog marks that sport's collections incomplete, and the publisher keeps their last-known-good
+#   playlists while still updating healthy collections.
+# - Snapshot and catalog read stored state, so they always run.
+# - Steps marked `gate` must succeed for later steps to run: a catalog that fails to build blocks publishing.
+# - The NFL all-teams diagnostic is measurement only and always runs last.
+# The script exits with the first non-zero code (diagnostic excluded) so Task Scheduler records the failure.
 #
 # Scripted dry check (no engine calls):
-#   ./scripts/run-hourly.ps1 -Simulate -SimulateFail discover -LogDir $env:TEMP\sc-check
+#   ./scripts/run-hourly.ps1 -Simulate -SimulateFail discover-nfl -LogDir $env:TEMP\sc-check
 param(
   [switch]$Simulate,
   [string[]]$SimulateFail = @(),
@@ -42,28 +44,33 @@ function Invoke-Step([string]$name, [string[]]$engineArgs) {
   return $code
 }
 
-# Personal chain, in dependency order. Downstream steps run only when every upstream step succeeded.
+# Personal chain, in order. One discover step per sport.
 $personal = @(
-  @{ name = 'discover'; args = @('discover', 'nfl', '--days', '7', '--kind', 'prospective') },
+  @{ name = 'discover-nfl'; args = @('discover', 'nfl', '--days', '7', '--kind', 'prospective') },
   @{ name = 'snapshot'; args = @('snapshot') },
-  # Catalog revalidates retained videos (YouTube API key) and exits 3 if any collection is incomplete.
-  @{ name = 'catalog'; args = @('catalog') }
-  # sync-playlists --apply is added only after an inspected dry run, manual apply, the Onn device gate,
-  # and a zero-change second apply (docs/08-validation-plan.md).
+  # Catalog revalidates retained videos (YouTube API key); incomplete collections are recorded inside it.
+  @{ name = 'catalog'; args = @('catalog'); gate = $true }
+  # sync-playlists --apply is added after the catalog only after an inspected dry run, manual apply, the Onn
+  # device gate, and a zero-change second apply (docs/08-validation-plan.md).
 )
 $diagnostic = @{ name = 'diagnostic'; args = @('discover', 'nfl', '--days', '7', '--kind', 'prospective', '--all-teams') }
 
 Set-Location $root
+$exitCode = 0
+$failed = @()
 foreach ($step in $personal) {
   $code = Invoke-Step $step.name $step.args
-  if ($code -ne 0) {
-    $skipped = @($personal | Select-Object -Skip ([array]::IndexOf($personal, $step) + 1) | ForEach-Object { $_.name }) + @('diagnostic')
-    Write-Log "CHAIN STOPPED: [$($step.name)] exit=$code; skipped: $($skipped -join ', '). Published/exported output is left as last-known-good (stale)."
-    exit $code
+  if ($code -eq 0) { continue }
+  $failed += "$($step.name)=$code"
+  if ($exitCode -eq 0) { $exitCode = $code }
+  if ($step.gate) {
+    $skipped = @($personal | Select-Object -Skip ([array]::IndexOf($personal, $step) + 1) | ForEach-Object { $_.name })
+    Write-Log "GATE FAILED: [$($step.name)] exit=$code; skipped: $(if ($skipped.Count) { $skipped -join ', ' } else { 'none' }). Published output is left as last-known-good."
+    break
   }
 }
 
 $code = Invoke-Step $diagnostic.name $diagnostic.args
-if ($code -ne 0) { Write-Log "Diagnostic run exit=$code (measurement only; does not affect the personal chain)." }
-Write-Log "CHAIN OK"
-exit 0
+if ($code -ne 0) { Write-Log "Diagnostic run exit=$code (measurement only; does not affect the exit code)." }
+if ($failed.Count) { Write-Log "CHAIN DONE WITH FAILURES: $($failed -join ', ')" } else { Write-Log "CHAIN OK" }
+exit $exitCode

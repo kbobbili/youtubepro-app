@@ -6,7 +6,7 @@ import type { Transport } from './http.ts';
 import { recordMetadataChecks } from './revalidate.ts';
 import type { Store } from './store.ts';
 import { parseIsoDuration, QuotaExceededError, type UploadItem, type UploadScan, type VideoMetadata, YouTubeClient } from './youtube/client.ts';
-import { screenVideo } from './youtube/screen.ts';
+import { blocksPlayback, screenVideo } from './youtube/screen.ts';
 
 /** Initial hypothesis: stop normal discovery ~72h after estimated event end (docs/03). */
 export const DISCOVERY_CUTOFF_MS = 72 * 3_600_000;
@@ -171,9 +171,10 @@ export async function discoverNfl(o: DiscoverOptions): Promise<DiscoverResult> {
         // Trust is re-checked per video: the channel must be the registered one.
         if (meta && meta.snippet.channelId !== cand.source.channelId) reasons.push('channel_mismatch');
         if (!match.matched) reasons.push(`no_match:${match.rejectionReason}`);
-        const eligible = match.matched && reasons.length === 0;
+        // Embed-only reasons stay recorded (the library export filters on them) but do not block SmartTube playback.
+        const eligible = match.matched && !reasons.some(blocksPlayback);
         if (match.matched) matchedCount++;
-        if (match.matched && !eligible) reasons.forEach((r) => ineligible.add(r));
+        if (match.matched && !eligible) reasons.filter(blocksPlayback).forEach((r) => ineligible.add(r));
         store.upsertCandidate(
           {
             eventId: e.id, videoId: cand.videoId, sourceId: cand.source.id, channelId: meta?.snippet.channelId ?? cand.source.channelId,

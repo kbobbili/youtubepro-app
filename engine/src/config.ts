@@ -123,6 +123,8 @@ export const PublishingConfig = z.object({
   /** Fixed per-collection write cap per run, so one busy collection cannot consume the budget. */
   writesPerCollectionPerRun: z.number().int().min(0),
   maxMetadataAgeHours: z.number().positive(),
+  /** A sport whose latest personal discovery run is older than this is incomplete, so its collections keep last-known-good. */
+  maxDiscoveryAgeHours: z.number().positive(),
   /** Explicit overrides of the title-screen exclusion default; shown in every dry run. */
   includeFlaggedTitles: z.boolean(),
   includeUnreviewedTitles: z.boolean(),

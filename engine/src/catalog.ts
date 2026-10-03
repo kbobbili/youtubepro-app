@@ -8,6 +8,7 @@ import { revalidateVideos, type RevalidationResult } from './revalidate.ts';
 import { SCREENING_VERSION } from './spoilers.ts';
 import type { Store } from './store.ts';
 import type { YouTubeClient } from './youtube/client.ts';
+import { blocksPlayback } from './youtube/screen.ts';
 
 /** Sports with an adapter. Collections for other sports are rejected until their adapter exists. */
 export const SUPPORTED_SPORTS = ['nfl'] as const;
@@ -68,16 +69,6 @@ function loadCandidates(store: Store, o: CatalogOptions): EventRow[] {
     .all(since, o.now) as unknown as EventRow[];
 }
 
-/** Why a completed event has no primary highlight: discovery state, or a matched-but-ineligible candidate. */
-function noHighlightReason(store: Store, row: EventRow): string {
-  const reasons = (store.db.prepare("SELECT metadata_reasons_json FROM candidates WHERE event_id = ? AND confidence > 0").all(row.event_id) as { metadata_reasons_json: string }[]).flatMap(
-    (r) => JSON.parse(r.metadata_reasons_json) as string[],
-  );
-  // Reported separately: the inherited embeddable rule may exclude videos SmartTube could play.
-  if (reasons.includes('embedding_disabled')) return 'embedding_disabled';
-  return `no_highlight:${row.discovery ?? 'NOT_TRACKED'}`;
-}
-
 function evaluate(store: Store, row: EventRow, o: CatalogOptions, trusted: Map<string, Source>, staleIds: Set<string>): Candidate {
   const home = JSON.parse(row.home_json) as Team;
   const away = JSON.parse(row.away_json) as Team;
@@ -86,7 +77,7 @@ function evaluate(store: Store, row: EventRow, o: CatalogOptions, trusted: Map<s
   const base = { event: row, home, away, priority, stale: false };
   const fail = (reason: string, stale = false): Candidate => ({ ...base, reason, stale });
 
-  if (!row.video_id || !row.source_id || row.discovery !== 'FOUND' || row.metadata_eligible !== 1) return fail(noHighlightReason(store, row));
+  if (!row.video_id || !row.source_id || row.discovery !== 'FOUND' || row.metadata_eligible !== 1) return fail(`no_highlight:${row.discovery ?? 'NOT_TRACKED'}`);
   if (row.duration_seconds === null || !row.published_at) return fail('duration_unknown');
   const source = trusted.get(row.source_id);
   if (!source) return fail('untrusted_source');
@@ -96,7 +87,8 @@ function evaluate(store: Store, row: EventRow, o: CatalogOptions, trusted: Map<s
   if (!check) return fail('metadata_unchecked', true);
   if (!check.available) return fail('video_unavailable'); // confirmed removal, distinct from a failed refresh
   if (check.channelId !== source.channelId) return fail('channel_mismatch');
-  if (check.screenReasons.length) return fail(check.screenReasons.includes('embedding_disabled') ? 'embedding_disabled' : `metadata:${check.screenReasons.join('+')}`);
+  const blocking = check.screenReasons.filter(blocksPlayback); // SmartTube plays embedding-disabled videos
+  if (blocking.length) return fail(`metadata:${blocking.join('+')}`);
 
   const screen = store.titleScreen(row.video_id);
   const current = screen && screen.titleFingerprint === check.titleFingerprint && screen.version === SCREENING_VERSION;
@@ -194,6 +186,9 @@ export function buildCatalog(store: Store, o: CatalogOptions, revalidation: Reva
   const inputIssues: string[] = [];
   if (!latest) inputIssues.push('nfl: no personal discovery run recorded');
   else if (latest.status !== 'ok') inputIssues.push(`nfl: latest personal discovery run ${latest.id} is ${latest.status ?? 'unfinished'}`);
+  else if (Date.parse(o.now) - Date.parse(latest.started_at) > o.collections.publishing.maxDiscoveryAgeHours * 3_600_000) {
+    inputIssues.push(`nfl: latest personal discovery run ${latest.id} is older than ${o.collections.publishing.maxDiscoveryAgeHours}h (discovery may not be running)`);
+  }
   const storedHistoryFrom = (store.db.prepare("SELECT MIN(start_time) AS t FROM events WHERE sport = 'nfl'").get() as { t: string | null }).t;
 
   return CatalogSnapshot.parse({

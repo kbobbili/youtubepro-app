@@ -3,9 +3,12 @@
 # configuration hypothesis, not a product decision. Collections are browsing lists, not a Catch Me Up queue.
 
 publishing:
-  dailyBudgetUnits: 3000          # per Pacific-time quota day; reads and attempted writes count
-  writesPerCollectionPerRun: 5    # collections are processed in the order listed below
+  # Safety rail, not a throttle: the project's default YouTube quota is 10,000 units/day, shared with discovery.
+  # Stopping the publisher at 8,000 keeps ~2,000 for discovery so a large backfill can't blind it until midnight PT.
+  dailyBudgetUnits: 8000          # per Pacific-time quota day; reads and attempted writes count
+  writesPerCollectionPerRun: 50   # fills a playlist in one run; collections are processed in the order listed below
   maxMetadataAgeHours: 24         # retained videos are re-checked when their last check is older
+  maxDiscoveryAgeHours: 6         # a sport whose latest discovery run is older is incomplete (keeps last-known-good)
   includeFlaggedTitles: false     # explicit overrides only; any override is shown in the dry run
   includeUnreviewedTitles: false
 
