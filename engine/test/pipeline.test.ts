@@ -163,7 +163,20 @@ describe('NFL discovery pipeline (recorded Week 3 fixtures)', () => {
 
 it('loads the committed config files', () => {
   expect(loadPreferences(root).sports.nfl?.teams.map((t) => t.abbr)).toEqual(['SF', 'BUF']);
-  expect(sources.filter((s) => s.enabled).map((s) => s.id)).toEqual(['nfl-youtube', 'f1-youtube', 'nbcsports-youtube', 'espnfc-youtube', 'atptour-youtube', 'willow-youtube', 'nba-youtube', 'mlb-youtube']);
+  expect(sources.filter((s) => s.enabled).map((s) => s.id)).toEqual(['nfl-youtube', 'f1-youtube', 'nbcsports-youtube', 'espnfc-youtube', 'atptour-youtube', 'tennistv-youtube', 'ecb-youtube', 'cricketaustralia-youtube', 'willow-youtube', 'nba-youtube', 'mlb-youtube']);
   expect(sources.filter((s) => s.enabled).every((s) => s.verification.status === 'verified')).toBe(true);
   expect(path.basename(root)).toBeTruthy();
+});
+
+it('primary selection prefers the better source, then the longer cut', () => {
+  const store = new Store(':memory:');
+  store.upsertEvent({ id: 'e', sport: 'x', competition: 'X', competitionId: 'X', provider: 'p', providerEventId: '1', season: 2026, startTime: '2026-10-01T00:00:00.000Z', status: 'COMPLETED', providerStatus: 'F', stage: null, participants: [], meta: {} }, 'now', false);
+  const cand = (videoId: string, sourceId: string, durationSeconds: number) =>
+    store.upsertCandidate({ eventId: 'e', videoId, sourceId, channelId: 'UC', rawTitle: 't', publishedAt: '2026-10-01T05:00:00Z', durationSeconds, confidence: 0.9, flags: [], metadataEligible: true, metadataReasons: [] }, 'now');
+  cand('short-fallback', 'willow', 330);
+  cand('board', 'ecb', 900);
+  cand('board-extended', 'ecb', 1800);
+  const tier = (id: string) => ({ ecb: 1, willow: 3 })[id] ?? 9;
+  expect(store.selectPrimary('e', 'now', tier)?.videoId).toBe('board-extended');
+  expect(store.selectPrimary('e', 'now', (id) => (id === 'willow' ? 0 : 5))?.videoId).toBe('short-fallback');
 });

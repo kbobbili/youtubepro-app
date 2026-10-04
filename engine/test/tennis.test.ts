@@ -12,7 +12,7 @@ import { YouTubeClient } from '../src/youtube/client.ts';
 import { FIXTURES, fixtureTransport, overriding } from './helpers.ts';
 
 const OCT = path.join(FIXTURES, 'tennis-2026-oct');
-const prefs: Preferences = { region: 'US', sports: { tennis: { enabled: true, tour: 'atp', rankThreshold: 30, maxRankingAgeDays: 10, priority: 'normal' } } };
+const prefs: Preferences = { region: 'US', sports: { tennis: { enabled: true, tour: 'atp', rankThreshold: 30, maxRankingAgeDays: 14, priority: 'normal' } } };
 
 const m = (over: Partial<SportEvent> = {}, meta: SportEvent['meta'] = {}): SportEvent => ({
   id: 'tennis:espn:183373', sport: 'tennis', competition: 'ATP Hangzhou', competitionId: 'atp', provider: 'espn', providerEventId: '183373',
@@ -27,11 +27,11 @@ const input = { videoId: 'v', title: 't', publishedAt: '2026-09-27T15:21:00Z', d
 
 describe('ATP Tour titles (observed 2026-10-03)', () => {
   it.each([
-    ['Carlos Alcaraz vs Matteo Arnaldi Highlights | Tokyo 2026 Round 2', { a: 'Carlos Alcaraz', b: 'Matteo Arnaldi', city: 'Tokyo', year: 2026, round: 'round 2' }],
-    ['Novak Djokovic vs Yunchaokete Bu  Highlights | Beijing Round 2', { a: 'Novak Djokovic', b: 'Yunchaokete Bu', city: 'Beijing', round: 'round 2' }],
-    ['Daniil Medvedev vs Coleman Wong Highlights | Hangzhou Open 2026 QF', { a: 'Daniil Medvedev', b: 'Coleman Wong', city: 'Hangzhou Open', year: 2026, round: 'qf' }],
-    ['Hugo Gaston vs Andrey Rublev Highlights | Hangzhou 2026 Quarter-Final', { a: 'Hugo Gaston', b: 'Andrey Rublev', city: 'Hangzhou', year: 2026, round: 'qf' }],
-    ['Hubert Hurkacz vs Alejandro Davidovich Fokina Highlights | Chengdu 2026 Final', { a: 'Hubert Hurkacz', b: 'Alejandro Davidovich Fokina', city: 'Chengdu', year: 2026, round: 'f' }],
+    ['Carlos Alcaraz vs Matteo Arnaldi Highlights | Tokyo 2026 Round 2', { a: 'Carlos Alcaraz', b: 'Matteo Arnaldi', hype: false, city: 'Tokyo', year: 2026, round: 'round 2' }],
+    ['Novak Djokovic vs Yunchaokete Bu  Highlights | Beijing Round 2', { a: 'Novak Djokovic', b: 'Yunchaokete Bu', hype: false, city: 'Beijing', round: 'round 2' }],
+    ['Daniil Medvedev vs Coleman Wong Highlights | Hangzhou Open 2026 QF', { a: 'Daniil Medvedev', b: 'Coleman Wong', hype: false, city: 'Hangzhou Open', year: 2026, round: 'qf' }],
+    ['Hugo Gaston vs Andrey Rublev Highlights | Hangzhou 2026 Quarter-Final', { a: 'Hugo Gaston', b: 'Andrey Rublev', hype: false, city: 'Hangzhou', year: 2026, round: 'qf' }],
+    ['Hubert Hurkacz vs Alejandro Davidovich Fokina Highlights | Chengdu 2026 Final', { a: 'Hubert Hurkacz', b: 'Alejandro Davidovich Fokina', hype: false, city: 'Chengdu', year: 2026, round: 'f' }],
   ])('parses %s', (title, parsed) => expect(parseTennisTitle(title)).toEqual(parsed));
 
   it.each([
@@ -49,6 +49,44 @@ describe('ATP Tour titles (observed 2026-10-03)', () => {
     expect(screenTitle('Sinner Continues Title Defence In Beijing', 'tennis').status).toBe('flagged');
     expect(screenTitle('Alcaraz saves match points to reach the final', 'tennis').status).toBe('flagged');
     expect(screenTitle('Carlos Alcaraz vs Matteo Arnaldi Highlights | Tokyo 2026 Round 2', 'tennis').status).toBe('unflagged');
+  });
+});
+
+
+describe('Tennis TV titles (observed 2026-10-04)', () => {
+  it.each([
+    ['Drama Filled Valentin Vacherot vs Arthur Fils | Tokyo 2026 Match Highlights', 'Tokyo', 2026, undefined],
+    ['Daniil Medvedev Faces Francisco Cerundolo 💪 | Beijing 2026 Highlights', 'Beijing', 2026, undefined],
+    ['Tommy Paul vs Alejandro Tabilo Match Highlights | Tokyo 2026', 'Tokyo', 2026, undefined],
+    ['Arthur Fils vs Luca Van Assche High-Quality Match 🔥 | Tokyo 2026', 'Tokyo', 2026, undefined],
+    ['Valentin Vacherot vs Alexander Blockx 💥 I Tokyo Match Highlights', 'Tokyo', undefined, undefined],
+    ['Alejandro Davidovich Fokina vs Hubert Hurkacz For The Title 🔥 | Chengdu 2026 Highlights Final', 'Chengdu', 2026, 'f'],
+    ['Alexander Zverev Takes On Cameron Norrie ⚔️ | Beijing 2026 Highlights', 'Beijing', 2026, undefined],
+  ])('parses %s', (title, city, year, round) => {
+    const p = parseTennisTitle(title)!;
+    expect(p).toMatchObject({ hype: true, city });
+    expect([p.year, p.round]).toEqual([year, round]);
+  });
+
+  it.each([
+    'Alcaraz Faces Shapovalov; Fils vs Vacherot Thriller & More | Tokyo 2026 Quarter-Final Highlights',
+    'Zverev Faces Shang; Medvedev, Rublev & De Minaur In Action | Beijing 2026 Highlights Day 4',
+    'Fils Headlines; Vacherot Takes on Blockx & More Feature 💥 | Tokyo 2026 Highlights Day 1',
+    'Bublik & Shang Bring the FUN 🤩 | Beijing 2026 Doubles Highlights',
+    'Novak Came Out FIRING 🔥',
+  ])('ignores roundups, doubles and clips: %s', (title) => expect(parseTennisTitle(title)).toBeUndefined());
+
+  it('reads names inside hype, accepts unique surnames, and never matches a shared surname', () => {
+    const input = { videoId: 'v', title: 't', publishedAt: '2026-09-27T15:21:00Z', durationSeconds: 240 };
+    const rublev = m({ participants: [{ id: '1', name: 'Hugo Gaston', shortName: 'H. Gaston', role: 'competitor' }, { id: '2', name: 'Andrey Rublev', shortName: 'A. Rublev', role: 'competitor' }] });
+    expect(tennisAdapter.match(rublev, parseTennisTitle('Rublev vs Gaston EPIC 🍿 | Hangzhou 2026 Highlights')!, input).matched).toBe(true);
+    expect(tennisAdapter.match(rublev, parseTennisTitle('Drama Filled Andrey Rublev vs Hugo Gaston Three-Set Battle | Hangzhou 2026 Highlights')!, input).matched).toBe(true);
+    const brothers = m(
+      { participants: [{ id: '3', name: 'Francisco Cerundolo', shortName: 'F. Cerundolo', role: 'competitor' }, { id: '4', name: 'Jakub Mensik', shortName: 'J. Mensik', role: 'competitor' }] },
+      { sharedSurnames: 'cerundolo' },
+    );
+    expect(tennisAdapter.match(brothers, parseTennisTitle('Cerundolo vs Mensik EPIC | Hangzhou 2026 Highlights')!, input).rejectionReason).toBe('players_differ');
+    expect(tennisAdapter.match(brothers, parseTennisTitle('Francisco Cerundolo vs Jakub Mensik | Hangzhou 2026 Highlights')!, input).matched).toBe(true);
   });
 });
 
@@ -86,18 +124,20 @@ describe('tennis eligibility (rankings policy)', () => {
 });
 
 describe('tennis discovery (recorded Sep 26–Oct 3 fixtures)', () => {
-  const run = (store: Store, t: Transport, now = '2026-10-04T00:58:00.000Z') =>
+  const run = (store: Store, t: Transport, now = '2026-10-04T13:16:00.000Z') =>
     discover({
       adapter: tennisAdapter, store, eventsTransport: t, youtube: new YouTubeClient(t, 'test'), sources: loadSources(repoRoot()), prefs,
       window: { start: '2026-09-26T00:00:00.000Z', end: '2026-10-04T00:00:00.000Z' }, cohort: 'personal', kind: 'backfill', runId: `t-${now}`, now: () => now,
     });
 
-  it('tracks Top-30 matches and finds their ATP Tour highlights', async () => {
+  it('tracks Top-30 matches and prefers Tennis TV highlights, with ATP Tour as the fallback', async () => {
     const store = new Store(':memory:');
     const r = await run(store, fixtureTransport(OCT));
     expect(r.status).toBe('ok');
     const by = (s: string) => r.outcomes.filter((o) => o.discovery === s).length;
-    expect({ tracked: r.outcomes.length, found: by('FOUND'), unavailable: by('UNAVAILABLE'), searching: by('SEARCHING') }).toEqual({ tracked: 45, found: 35, unavailable: 1, searching: 9 });
+    expect({ tracked: r.outcomes.length, found: by('FOUND'), unavailable: by('UNAVAILABLE'), searching: by('SEARCHING') }).toEqual({ tracked: 45, found: 36, unavailable: 7, searching: 2 });
+    const sources = store.db.prepare('SELECT source_id, COUNT(*) AS n FROM highlights GROUP BY source_id ORDER BY source_id').all();
+    expect(sources).toEqual([{ source_id: 'atptour-youtube', n: 22 }, { source_id: 'tennistv-youtube', n: 14 }]);
     const wong = r.outcomes.find((o) => o.event.providerEventId === '183373')!;
     expect(wong.primary?.videoId).toBe('QstPIQhG8Zc');
     expect(store.latestRankingSnapshot('atp')?.complete).toBe(true);
@@ -122,7 +162,7 @@ describe('tennis discovery (recorded Sep 26–Oct 3 fixtures)', () => {
     const store = new Store(':memory:');
     await run(store, fixtureTransport(OCT));
     const down = overriding(fixtureTransport(OCT), (u) => (u.hostname === 'sports.core.api.espn.com' ? { status: 503, body: null } : undefined));
-    const ok = await run(store, down, '2026-10-04T02:00:00.000Z');
+    const ok = await run(store, down, '2026-10-04T14:00:00.000Z');
     expect(ok.status).toBe('ok');
     expect(ok.notes[0]).toMatch(/using cached snapshot/);
     const later = await run(store, down, '2026-10-20T02:00:00.000Z');

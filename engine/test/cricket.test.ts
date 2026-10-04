@@ -31,18 +31,23 @@ const input = { videoId: 'v', title: 't', publishedAt: '2026-09-27T20:00:00Z', d
 
 describe('Willow titles (observed 2026-10-03)', () => {
   it.each([
-    ['Highlights: 2nd ODI, South Africa vs Australia | SA vs AUS', { matchNumber: 2, format: 'ODI', a: 'South Africa', b: 'Australia' }],
-    ['Highlights : 3rd T20I, Afghanistan vs India | IND vs AFG', { matchNumber: 3, format: 'T20I', a: 'Afghanistan', b: 'India' }],
-    ['Highlights: 3rd T20I - England vs Sri Lanka | ENG vs SL', { matchNumber: 3, format: 'T20I', a: 'England', b: 'Sri Lanka' }],
-    ['Highlights: 1st ODI India vs West Indies | 1st ODI -  IND vs WI', { matchNumber: 1, format: 'ODI', a: 'India', b: 'West Indies' }],
-  ])('parses %s', (title, parsed) => expect(parseCricketTitle(title)).toEqual(parsed));
+    ['Highlights: 2nd ODI, South Africa vs Australia | SA vs AUS', 2, 'ODI'],
+    ['Highlights : 3rd T20I, Afghanistan vs India | IND vs AFG', 3, 'T20I'],
+    ['Highlights: 3rd T20I - England vs Sri Lanka | ENG vs SL', 3, 'T20I'],
+    ['Highlights: 1st ODI India vs West Indies | 1st ODI -  IND vs WI', 1, 'ODI'],
+    // Board formats (ECB): sponsor words between number and format; "IT20" = T20I.
+    ['Thrilling Finish! | Highlights - England v Sri Lanka | 2nd Metro Bank ODI 2026', 2, 'ODI'],
+    ['Buttler Leads The Way! | Highlights - England v Sri Lanka | 3rd Vitality IT20 2026', 3, 'T20I'],
+    ['Highlights | West Indies v India | Final Ball Finish | 1st CG United ODI', 1, 'ODI'],
+  ])('parses %s', (title, matchNumber, format) => expect(parseCricketTitle(title)).toMatchObject({ matchNumber, format }));
 
   it.each([
     'Day 4 Highlights: 3rd Test - England vs Pakistan | Day 4, 3rd Test - ENG vs PAK',
     'Highlights: 35th Match, Barbados Tridents vs Guyana Amazon Warriors',
     'Highlights: Final - Trinbago Knight Riders Women vs Guyana Amazon Warriors Women',
     'Japan run India close | Match Highlights',
-  ])('ignores Tests, leagues and other formats: %s', (title) => expect(parseCricketTitle(title)).toBeUndefined());
+    'Highlights: 3rd ODI, South Africa Women vs Australia Women',
+  ])('ignores Tests, leagues, women\'s fixtures and other formats: %s', (title) => expect(parseCricketTitle(title)).toBeUndefined());
 
   it('flags result language (ICC-style) while Willow titles pass', () => {
     expect(screenTitle('Japan run India close | Match Highlights', 'cricket').status).toBe('flagged');
@@ -53,6 +58,12 @@ describe('Willow titles (observed 2026-10-03)', () => {
 
 describe('cricket matching', () => {
   const p = parseCricketTitle('Highlights: 2nd ODI, South Africa vs Australia | SA vs AUS')!;
+  it('matches board titles with hype and sponsor words around the teams', () => {
+    const eng = odi({ participants: [{ id: '1', name: 'England', shortName: 'ENG', abbr: 'ENG', role: 'home' }, { id: '8', name: 'Sri Lanka', shortName: 'SL', abbr: 'SL', role: 'away' }] });
+    expect(cricketAdapter.match(eng, parseCricketTitle('Thrilling Finish! | Highlights - England v Sri Lanka | 2nd Metro Bank ODI 2026')!, input).matched).toBe(true);
+    expect(cricketAdapter.sourceCompetition({ ...eng, meta: { ...eng.meta, country: 'England' } })).toEqual(['series:24203', 'host:England', 'team:1', 'team:8']);
+  });
+
   it('matches format, match number and both nations in either order', () => {
     // No order bonus: Willow lists India's home series as "Afghanistan vs India", so title order is not evidence.
     expect(cricketAdapter.match(odi(), p, input)).toEqual({ matched: true, confidence: 0.9, flags: [] });
@@ -61,7 +72,7 @@ describe('cricket matching', () => {
   it.each([
     ['another match in the series', odi({}, { matchNumber: 3 }), p, 'match_number_differs'],
     ['another format', odi({}, { format: 'T20I' }), p, 'format_differs'],
-    ['the women\'s or A team', odi(), parseCricketTitle('Highlights: 2nd ODI, South Africa Women vs Australia Women')!, 'teams_differ'],
+    ['the A teams', odi(), parseCricketTitle('Highlights: 2nd ODI, South Africa A vs Australia A')!, 'teams_differ'],
   ])('rejects %s', (_l, e, parsed, reason) => expect(cricketAdapter.match(e, parsed, input).rejectionReason).toBe(reason));
   it('follows men\'s ODI/T20I of followed nations, and respects the ICC switch', () => {
     expect(cricketAdapter.follow(odi(), prefs)).toEqual({ followed: true, priority: 1 });
@@ -77,15 +88,20 @@ describe('cricket discovery (recorded Sep 10–Oct 3 fixtures)', () => {
     const t = fixtureTransport(SEP);
     const r = await discover({
       adapter: cricketAdapter, store, eventsTransport: t, youtube: new YouTubeClient(t, 'test'), sources: loadSources(repoRoot()), prefs,
-      window: { start: '2026-09-10T00:00:00.000Z', end: '2026-10-04T00:00:00.000Z' }, cohort: 'personal', kind: 'backfill', runId: 'cr', now: () => '2026-10-04T01:01:00.000Z',
+      window: { start: '2026-09-10T00:00:00.000Z', end: '2026-10-04T00:00:00.000Z' }, cohort: 'personal', kind: 'backfill', runId: 'cr', now: () => '2026-10-04T13:14:00.000Z',
     });
     expect(r.status).toBe('ok');
     const found = r.outcomes.filter((o) => o.discovery === 'FOUND').map((o) => `${o.event.stage} ${cricketAdapter.neutralTitle(o.event)}`);
     expect(found).toEqual([
       '1st T20I India vs Afghanistan', '2nd T20I India vs Afghanistan', '1st T20I England vs Sri Lanka', '3rd T20I India vs Afghanistan',
-      '3rd T20I England vs Sri Lanka', '1st ODI South Africa vs Australia', '2nd ODI England vs Sri Lanka', '2nd ODI South Africa vs Australia',
-      '1st ODI India vs West Indies', '2nd ODI India vs West Indies',
+      '2nd T20I England vs Sri Lanka', '3rd T20I England vs Sri Lanka', '1st ODI England vs Sri Lanka', '1st ODI South Africa vs Australia',
+      '2nd ODI England vs Sri Lanka', '2nd ODI South Africa vs Australia', '1st ODI India vs West Indies', '3rd ODI England vs Sri Lanka',
+      '2nd ODI India vs West Indies',
     ]);
+    // The home board (ECB, ~15 min) is preferred over Willow (~5.5 min) and also covers matches Willow skipped.
+    const england = r.outcomes.filter((o) => o.event.meta.country === 'England' && o.primary);
+    expect(england).toHaveLength(6);
+    expect(england.every((o) => store.db.prepare('SELECT source_id FROM highlights WHERE event_id = ?').get(o.event.id)!.source_id === 'ecb-youtube')).toBe(true);
     const uncovered = r.outcomes.filter((o) => o.ineligibleReasons.some((x) => x.startsWith('no_trusted_source:series:')));
     expect(uncovered.map((o) => o.event.competition)).toContain('Australia tour of Zimbabwe 2026');
     expect(r.outcomes.every((o) => o.event.meta.format === 'ODI' || o.event.meta.format === 'T20I')).toBe(true);

@@ -10,7 +10,7 @@ publishing:
   writesPerCollectionPerRun: 50   # fills a playlist in one run; collections are processed in the order listed below
   maxMetadataAgeHours: 24         # retained videos are re-checked when their last check is older
   maxDiscoveryAgeHours: 6         # a sport whose latest discovery run is older is incomplete (keeps last-known-good)
-  includeFlaggedTitles: false     # explicit overrides only; any override is shown in the dry run
+  includeFlaggedTitles: true      # user decision 2026-10-04: best content over spoiler-free titles (shown in every dry run)
   includeUnreviewedTitles: false
 
 # Playlist rules (user decisions 2026-10-03). Every playlist is ordered newest YouTube upload first.

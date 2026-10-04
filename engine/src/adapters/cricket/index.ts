@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { PRIORITY_RANK } from '../../config.ts';
 import type { EventStatus, Participant, SportEvent, Window } from '../../domain.ts';
 import { getJson, type Transport } from '../../http.ts';
-import { nameRefersTo, reject, scoreMatch, timingRejection } from '../common.ts';
+import { endsWithName, normalizeName, reject, scoreMatch, timingRejection } from '../common.ts';
 import { NOT_FOLLOWED, type EventFetchResult, type SportAdapter } from '../types.ts';
 
 /**
@@ -136,23 +136,48 @@ export async function fetchCricketEvents(transport: Transport, window: Window): 
 export interface ParsedCricketTitle {
   matchNumber: number;
   format: 'ODI' | 'T20I';
-  a: string;
-  b: string;
+  /** Text either side of each " v "/" vs " in the title (within its "|" segment); teams sit at the inner edges. */
+  pairs: { left: string; right: string }[];
 }
 
-const TITLE = /^Highlights\s*:\s*(?<num>\d+)(?:st|nd|rd|th)\s+(?<fmt>ODI|T20I)\s*[,\-–]?\s*(?<a>.+?)\s+vs\.?\s+(?<b>.+?)(?:\s*\|.*)?$/i;
+/**
+ * Highlight titles from Willow and the boards (observed 2026-10-04):
+ *   Willow   "Highlights: 2nd ODI, South Africa vs Australia | SA vs AUS"
+ *   ECB      "<hype> | Highlights - England v Sri Lanka | 3rd Metro Bank ODI 2026"   ("Vitality IT20" = T20I)
+ *   Windies  "Highlights | West Indies v India | <hype> | 1st CG United ODI"
+ *            "<hype> | Extended Highlights West Indies v India 2nd CG United ODI"
+ * Sponsor words may sit between the match number and the format. Tests, day highlights, women's and A/U19
+ * fixtures never parse; neither do roundups without a match number.
+ */
+const MATCH = /\b(?<num>\d+)(?:st|nd|rd|th)\s+(?:[A-Za-z&]+\s+){0,3}?(?<fmt>ODI|T20I|IT20)\b/i;
+const EXCLUDE = /\b(test|day \d+|women|u-?19|under-?19|a team)\b/i;
 
 export function parseCricketTitle(title: string): ParsedCricketTitle | undefined {
-  const m = TITLE.exec(title.trim().replace(/\s+/g, ' '));
+  const t = title.trim().replace(/\s+/g, ' ');
+  if (!/highlights/i.test(t) || EXCLUDE.test(t)) return undefined;
+  const m = MATCH.exec(t);
   if (!m?.groups) return undefined;
-  return { matchNumber: Number(m.groups.num), format: m.groups.fmt!.toUpperCase() === 'ODI' ? 'ODI' : 'T20I', a: m.groups.a!.trim(), b: m.groups.b!.trim() };
+  const pairs = t.split('|').flatMap((segment) => {
+    const parts = segment.split(/\s+vs?\.?\s+/i);
+    return parts.slice(0, -1).map((left, i) => ({ left: left.trim(), right: parts[i + 1]!.trim() }));
+  });
+  if (!pairs.length) return undefined;
+  return { matchNumber: Number(m.groups.num), format: m.groups.fmt!.toUpperCase() === 'ODI' ? 'ODI' : 'T20I', pairs };
 }
 
-/** Exact team identity: "India" never matches "India Women" or "India A". */
-const isTeam = (text: string, p: Participant) => nameRefersTo(text, p.name) && nameRefersTo(p.name, text);
+/** Team names a title may use: ESPN display name and abbreviation ("West Indies", "WI"). */
+const names = (p: Participant) => [p.name, p.abbr ?? p.shortName].map(normalizeName).filter(Boolean);
+/** "…, South Africa" / "Extended Highlights West Indies" end with the team. */
+const endsWithTeam = (text: string, p: Participant) => names(p).some((n) => endsWithName(text, n));
+/** "India 2nd CG United ODI" starts with the team; "India Women" / "India A" do not. */
+const startsWithTeam = (text: string, p: Participant) => {
+  const t = normalizeName(text);
+  return names(p).some((n) => t === n || (t.startsWith(`${n} `) && !/^(women|a|u19|xi)\b/.test(t.slice(n.length + 1))));
+};
 const teamsMatch = (e: SportEvent, p: ParsedCricketTitle) => {
   const [x, y] = e.participants;
-  return !!x && !!y && ((isTeam(p.a, x) && isTeam(p.b, y)) || (isTeam(p.a, y) && isTeam(p.b, x)));
+  if (!x || !y) return false;
+  return p.pairs.some(({ left, right }) => (endsWithTeam(left, x) && startsWithTeam(right, y)) || (endsWithTeam(left, y) && startsWithTeam(right, x)));
 };
 const duration = (e: SportEvent) => DURATION_MS[e.meta.format === 'T20I' ? 'T20I' : 'ODI'];
 
@@ -168,7 +193,9 @@ export const cricketAdapter: SportAdapter<ParsedCricketTitle> = {
     const hits = cricket.teams.filter((t) => ids.has(t.id));
     return hits.length ? { followed: true, priority: Math.max(...hits.map((t) => PRIORITY_RANK[t.priority])) } : NOT_FOLLOWED;
   },
-  sourceCompetition: (e) => e.competitionId,
+  // Coverage keys: the series (Willow, per observed series), the host country (home boards: ECB, Cricket Australia)
+  // and each team (a board covering its team's matches home and away, e.g. Windies).
+  sourceCompetition: (e) => [e.competitionId, ...(e.meta.country ? [`host:${e.meta.country}`] : []), ...e.participants.map((p) => `team:${p.id}`)],
   parseTitle: parseCricketTitle,
   related: (e, p) => teamsMatch(e, p),
   match(e, p, input) {

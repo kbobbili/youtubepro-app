@@ -15,8 +15,8 @@ export interface SportAdapter<P = unknown> {
   fetchEvents(ctx: FetchContext): Promise<EventFetchResult>;
   /** Pure function of preferences and event data, so the catalog can re-evaluate it every build. */
   follow(e: SportEvent, prefs: Preferences): FollowDecision;
-  /** Key matched against a source's `competitions` list in config/sources.yaml. */
-  sourceCompetition(e: SportEvent): string;
+  /** Coverage key(s) matched against a source's `competitions` list in config/sources.yaml (the first is the reported key). */
+  sourceCompetition(e: SportEvent): string | string[];
   parseTitle(title: string): P | undefined;
   /** Cheap identity check (same participants). Related candidates are recorded even when `match` rejects them. */
   related(e: SportEvent, parsed: P): boolean;

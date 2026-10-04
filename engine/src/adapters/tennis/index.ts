@@ -133,6 +133,21 @@ function withRanks(e: SportEvent, snapshot: RankingSnapshot | undefined): SportE
 
 const ymd = (t: number) => new Date(t).toISOString().slice(0, 10).replaceAll('-', '');
 
+/** Surnames carried by more than one player in a draw (comma-separated, normalized), e.g. "cerundolo". */
+function sharedSurnamesIn(competitions: unknown[]): string {
+  const byName = new Map<string, Set<string>>();
+  for (const raw of competitions) {
+    const c = Competition.safeParse(raw);
+    if (!c.success) continue;
+    for (const p of c.data.competitors) {
+      if (isTbd(p)) continue;
+      const last = normalizeName(p.athlete!.displayName).split(' ').at(-1)!;
+      byName.set(last, (byName.get(last) ?? new Set()).add(p.id));
+    }
+  }
+  return [...byName].filter(([, ids]) => ids.size > 1).map(([n]) => n).sort().join(',');
+}
+
 export async function fetchAtpEvents(transport: Transport, window: Window, store: Store, now: string, maxRankingAgeDays: number): Promise<EventFetchResult> {
   const issues: string[] = [];
   const notes: string[] = [];
@@ -180,9 +195,11 @@ export async function fetchAtpEvents(transport: Transport, window: Window, store
       }
       for (const g of tp.data.groupings ?? []) {
         if (g.grouping.slug !== 'mens-singles') continue;
+        const sharedSurnames = sharedSurnamesIn(g.competitions);
         for (const rawC of g.competitions) {
           try {
             const ev = normalizeAtpMatch(rawC, tp.data);
+            if (ev) ev.meta.sharedSurnames = sharedSurnames;
             if (ev && ev.startTime >= window.start && ev.startTime < window.end) byId.set(ev.id, withRanks(ev, snapshot));
           } catch (err) {
             issues.push(`ESPN ATP: malformed match ${String((rawC as { id?: unknown })?.id ?? '?')}: ${(err as Error).message.slice(0, 160)}`);
@@ -198,13 +215,30 @@ export async function fetchAtpEvents(transport: Transport, window: Window, store
 // ---- Titles and matching ---------------------------------------------------------
 
 export interface ParsedTennisTitle {
+  /** Text before/after " vs " (or Tennis TV's " Faces "): exact names (ATP Tour) or names wrapped in hype (Tennis TV). */
   a: string;
   b: string;
+  /** True when a/b may carry hype words around the names ("Drama Filled Valentin Vacherot"). */
+  hype: boolean;
   city: string;
   year?: number;
-  /** Normalized round: "round 1", "round 2", … "qf", "sf", "f". */
-  round: string;
+  /** Normalized round when the title names one: "round 1", … "qf", "sf", "f". Tennis TV titles usually omit it. */
+  round?: string;
 }
+
+/**
+ * Tennis TV (preferred, longer packages; observed 2026-10-04). Formats vary widely:
+ *   "Drama Filled Valentin Vacherot vs Arthur Fils | Tokyo 2026 Match Highlights"
+ *   "Daniil Medvedev Faces Francisco Cerundolo 💪 | Beijing 2026 Highlights"
+ *   "Tommy Paul vs Alejandro Tabilo Match Highlights | Tokyo 2026"
+ *   "Arthur Fils vs Luca Van Assche High-Quality Match 🔥 | Tokyo 2026"
+ *   "Valentin Vacherot vs Alexander Blockx 💥 I Tokyo Match Highlights"        (capital I as the separator)
+ *   "Alejandro Davidovich Fokina vs Hubert Hurkacz For The Title 🔥 | Chengdu 2026 Highlights Final"
+ *   "Rublev vs Gaston EPIC 🍿 | Hangzhou 2026 Highlights"                       (surnames only)
+ * Never parsed: roundups ("…; … & More", "… Feature", "… Highlights Day 4"), doubles, and clips without a "| <City>" part.
+ */
+const TV_TITLE = /^(?<players>[^|]+?)\s*\|\s*(?<city>[A-Za-z][A-Za-z .'-]*?)(?:\s+(?<year>\d{4}))?(?:\s+(?:Match\s+|Condensed\s+)?Highlights)?(?:\s+(?<round>Round\s+(?:of\s+)?\d+|Quarter-?finals?|Semi-?finals?|Finals?))?\s*$/i;
+const CONNECTOR = /\s+(?:vs\.?|faces|battles|takes on|meets)\s+/i;
 
 const TITLE = /^(?<a>.+?)\s+vs\.?\s+(?<b>.+?)\s+Highlights\s*\|\s*(?<city>.+?)(?:\s+(?<year>\d{4}))?\s+(?<round>Round\s+(?:of\s+)?\d+|R\d+|Quarter-?finals?|QF|Semi-?finals?|SF|Finals?)\s*$/i;
 
@@ -219,9 +253,22 @@ export function normalizeRound(round: string): string {
 }
 
 export function parseTennisTitle(title: string): ParsedTennisTitle | undefined {
-  const m = TITLE.exec(title.trim().replace(/\s+/g, ' '));
-  if (!m?.groups) return undefined;
-  return { a: m.groups.a!, b: m.groups.b!, city: m.groups.city!, round: normalizeRound(m.groups.round!), ...(m.groups.year ? { year: Number(m.groups.year) } : {}) };
+  const t = title.trim().replace(/\s+/g, ' ');
+  const m = TITLE.exec(t);
+  if (m?.groups) {
+    return { a: m.groups.a!, b: m.groups.b!, hype: false, city: m.groups.city!, round: normalizeRound(m.groups.round!), ...(m.groups.year ? { year: Number(m.groups.year) } : {}) };
+  }
+  // "… 💥 I Tokyo Match Highlights": a capital I used as the separator.
+  const tv = TV_TITLE.exec(t.includes('|') ? t : t.replace(/\s+I\s+(?=[A-Z][A-Za-z .'-]*?(?:\s+\d{4})?\s+(?:Match\s+)?Highlights\s*$)/, ' | '));
+  if (!tv?.groups || /\bday \d+\b|doubles/i.test(t)) return undefined;
+  const players = tv.groups.players!.replace(/\s+(?:match\s+)?highlights\s*$/i, '');
+  if (/[;&]|\bmore\b|\bin action\b|\bfeature\b/i.test(players)) return undefined; // several matches in one video
+  const parts = players.split(CONNECTOR);
+  if (parts.length !== 2) return undefined;
+  return {
+    a: parts[0]!, b: parts[1]!, hype: true, city: tv.groups.city!.trim(), ...(tv.groups.year ? { year: Number(tv.groups.year) } : {}),
+    ...(tv.groups.round ? { round: normalizeRound(tv.groups.round) } : {}),
+  };
 }
 
 /** Tournament names used in place of the city in some titles. */
@@ -234,10 +281,24 @@ const sameCity = (a: string, b: string) => {
   return x === y || CITY_ALIASES.some((g) => g.includes(x) && g.includes(y));
 };
 
+/**
+ * The name may be wrapped in hype: a run of words at the inner edge (end of a, start of b) must refer to the player —
+ * 2–4 words as a (possibly shortened) full name, or a bare surname only when no two players in this tournament's draw
+ * share it (e.g. the Cerundolo brothers never match by surname).
+ */
+const words = (s: string) => normalizeName(s.replace(/['’]s\b/gi, '')).split(' ').filter(Boolean); // "Nishikori's" → "nishikori"
+const surname = (full: string) => words(full).at(-1) ?? '';
+const refersTo = (run: string[], full: string, shared: Set<string>) =>
+  run.length === 1 ? run[0] === surname(full) && !shared.has(run[0]!) : nameRefersTo(run.join(' '), full);
+const refersAtEnd = (text: string, full: string, shared: Set<string>) => [1, 2, 3, 4].some((k) => words(text).length >= k && refersTo(words(text).slice(-k), full, shared));
+const refersAtStart = (text: string, full: string, shared: Set<string>) => [1, 2, 3, 4].some((k) => words(text).length >= k && refersTo(words(text).slice(0, k), full, shared));
+
 const playersMatch = (e: SportEvent, p: ParsedTennisTitle) => {
   const [x, y] = e.participants;
   if (!x || !y || x.id === 'TBD' || y.id === 'TBD') return false;
-  return (nameRefersTo(p.a, x.name) && nameRefersTo(p.b, y.name)) || (nameRefersTo(p.a, y.name) && nameRefersTo(p.b, x.name));
+  const shared = new Set(String(e.meta.sharedSurnames ?? '').split(',').filter(Boolean));
+  const pair = (l: string, r: string) => (p.hype ? refersAtEnd(p.a, l, shared) && refersAtStart(p.b, r, shared) : nameRefersTo(p.a, l) && nameRefersTo(p.b, r));
+  return pair(x.name, y.name) || pair(y.name, x.name);
 };
 
 const duration = (e: SportEvent) => (e.meta.major ? MAJOR_MATCH_MS : TOUR_MATCH_MS);
@@ -279,7 +340,8 @@ export const tennisAdapter: SportAdapter<ParsedTennisTitle> = {
   match(e, p, input) {
     if (!playersMatch(e, p)) return reject('players_differ');
     if (!sameCity(p.city, String(e.meta.city))) return reject('tournament_differs');
-    if (p.round !== normalizeRound(e.stage ?? '')) return reject('round_differs');
+    // A single-elimination draw has each matchup once per tournament, so players + city + year identify it when the round is absent.
+    if (p.round !== undefined && p.round !== normalizeRound(e.stage ?? '')) return reject('round_differs');
     if (p.year !== undefined && p.year !== e.season) return reject('season_differs');
     const timing = timingRejection(e, input, duration(e), 72, MIN_SECONDS);
     if (timing) return reject(timing);

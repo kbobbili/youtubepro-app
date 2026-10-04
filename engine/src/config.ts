@@ -70,10 +70,16 @@ export function loadSources(root = repoRoot()): Source[] {
 }
 
 /** Only enabled AND verified sources are trusted, scoped to sport, competition, and region. */
-export function trustedSources(sources: Source[], sport: string, competition: string, region: string): Source[] {
+/**
+ * Only enabled AND verified sources are trusted, scoped to sport, region and any of the event's coverage keys
+ * (e.g. a cricket match is covered by its series, its host country or either team). Ordered by preference:
+ * lower tier first.
+ */
+export function trustedSources(sources: Source[], sport: string, competition: string | string[], region: string): Source[] {
+  const keys = Array.isArray(competition) ? competition : [competition];
   return sources
     .filter((s) => s.enabled && s.verification.status === 'verified')
-    .filter((s) => s.sport === sport && s.competitions.includes(competition) && s.regions.includes(region))
+    .filter((s) => s.sport === sport && s.competitions.some((c) => keys.includes(c)) && s.regions.includes(region))
     .sort((a, b) => a.tier - b.tier || a.id.localeCompare(b.id));
 }
 

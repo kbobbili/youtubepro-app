@@ -514,14 +514,19 @@ export class Store {
       );
   }
 
-  /** Deterministic primary: eligible only; highest confidence, then earliest publish, then video ID. */
-  selectPrimary(eventId: string, at: string): { videoId: string; sourceId: string } | undefined {
-    const best = this.db
-      .prepare(
-        `SELECT video_id, source_id FROM candidates WHERE event_id = ? AND metadata_eligible = 1
-         ORDER BY confidence DESC, published_at ASC, video_id ASC LIMIT 1`,
-      )
-      .get(eventId) as { video_id: string; source_id: string } | undefined;
+  /**
+   * Deterministic primary among eligible candidates: preferred source first (`sourceRank`, lower wins), then
+   * highest confidence, then the longer video (best content, e.g. an extended cut), then earliest publish, then ID.
+   */
+  selectPrimary(eventId: string, at: string, sourceRank: (sourceId: string) => number = () => 0): { videoId: string; sourceId: string } | undefined {
+    const rows = this.db
+      .prepare('SELECT video_id, source_id, confidence, duration_seconds, published_at FROM candidates WHERE event_id = ? AND metadata_eligible = 1')
+      .all(eventId) as { video_id: string; source_id: string; confidence: number; duration_seconds: number | null; published_at: string }[];
+    const best = rows.sort(
+      (a, b) =>
+        sourceRank(a.source_id) - sourceRank(b.source_id) || b.confidence - a.confidence || (b.duration_seconds ?? 0) - (a.duration_seconds ?? 0) ||
+        a.published_at.localeCompare(b.published_at) || a.video_id.localeCompare(b.video_id),
+    )[0];
     if (!best) {
       this.db.prepare('DELETE FROM highlights WHERE event_id = ?').run(eventId);
       return undefined;

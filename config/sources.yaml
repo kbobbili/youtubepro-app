@@ -84,7 +84,7 @@ sources:
   - id: atptour-youtube
     sport: tennis
     displayName: ATP Tour
-    tier: 1
+    tier: 2                       # fallback: neutral titles but ~2-minute packages
     platform: youtube
     channelId: UCY_5h5zaSwN7Or4kIJDYNXA
     enabled: true
@@ -98,10 +98,86 @@ sources:
         atptour.com footer links https://www.youtube.com/channel/UCY_5h5zaSwN7Or4kIJDYNXA (@atptour).
         Coverage: "<A> vs <B> Highlights | <City> 2026 <Round>" for Tokyo and Beijing main-draw matches. Grand Slams are not on this channel.
 
+  - id: tennistv-youtube
+    sport: tennis
+    displayName: Tennis TV
+    tier: 1                       # preferred: ~4-minute packages (user decision 2026-10-04: best content, spoilers OK)
+    platform: youtube
+    channelId: UCbcxFkd6B9xUU54InHv4Tig
+    enabled: true
+    regions: [US]
+    competitions: [atp]
+    verification:
+      status: verified
+      verifiedAt: "2026-10-04"
+      evidenceUrl: https://www.tennistv.com/
+      method: >-
+        tennistv.com links https://www.youtube.com/tennistv, whose channel is UCbcxFkd6B9xUU54InHv4Tig (Tennis TV, the ATP's
+        streaming service). Coverage: per-match "<A> vs|Faces <B> | <City> 2026 [Match] Highlights" for Tokyo/Beijing (median 4.2 min
+        vs 2.3 min on ATP Tour). Titles often describe the match ("three-set battle"); accepted by the user.
+
+  - id: ecb-youtube
+    sport: cricket
+    displayName: England & Wales Cricket Board
+    tier: 1                       # home board: ~15-minute packages
+    platform: youtube
+    channelId: UCz1D0n02BR3t51KuBOPmfTQ
+    enabled: true
+    regions: [US]
+    competitions: [host:England, host:Wales]
+    verification:
+      status: verified
+      verifiedAt: "2026-10-04"
+      evidenceUrl: https://www.ecb.co.uk/
+      method: >-
+        ecb.co.uk links https://www.youtube.com/channel/UCz1D0n02BR3t51KuBOPmfTQ (@officialenglandcricket). Coverage: all six
+        England v Sri Lanka 2026 matches, "<hype> | Highlights - England v Sri Lanka | <n> <sponsor> ODI|IT20 2026", ~15 min, US-playable.
+
+  - id: cricketaustralia-youtube
+    sport: cricket
+    displayName: Cricket Australia
+    tier: 1                       # home board
+    platform: youtube
+    channelId: UC2naOExy27J5Qz3SO-w6xkQ
+    enabled: true
+    regions: [US]
+    competitions: [host:Australia]
+    verification:
+      status: verified
+      verifiedAt: "2026-10-04"
+      evidenceUrl: https://www.cricket.com.au/
+      method: >-
+        cricket.com.au links https://www.youtube.com/@CricketAus, whose channel is UC2naOExy27J5Qz3SO-w6xkQ (not @cricketcomau).
+        Home internationals are the board's own rights; not yet observed for a 2026-27 home series (away series are not posted).
+        Willow remains the fallback.
+
+  - id: windies-youtube
+    sport: cricket
+    displayName: Windies Cricket
+    tier: 1                       # board: posts West Indies matches home and away
+    platform: youtube
+    channelId: UC2MHTOXktfTK26aDKyQs3cQ
+    # Disabled 2026-10-04: its "West Indies v India … CG United ODI" uploads are an earlier series re-posted (one published before
+    # the current 2nd ODI was played, one a week after the current 1st ODI). Titles carry no date, so a re-post could match a new
+    # game; enable only after it is seen covering a current series promptly.
+    enabled: false
+    regions: [US]
+    competitions: [team:4]
+    verification:
+      status: verified
+      verifiedAt: "2026-10-04"
+      evidenceUrl: https://www.windiescricket.com/
+      method: >-
+        windiescricket.com links https://www.youtube.com/channel/UC2MHTOXktfTK26aDKyQs3cQ (@windiescricket). Ownership verified;
+        current-series coverage not observed (see note above).
+
+  # No verified YouTube channel: BCCI (bcci.tv hosts its own video; "@BCCI" is an unrelated account), Sri Lanka Cricket and
+  # New Zealand Cricket (no link on their sites), Cricket South Africa and PCB (sites unreachable on 2026-10-04).
+
   - id: willow-youtube
     sport: cricket
     displayName: Willow
-    tier: 3
+    tier: 3                       # fallback where no board channel covers the match (~5.5-minute packages)
     platform: youtube
     channelId: UC2V_LHwvaNS2XWZ5l8x3jLQ
     enabled: true
@@ -171,8 +247,6 @@ sources:
         Coverage: "<AWAY> vs. <HOME>: Official Full Game Highlights (<Month D>)" and postseason "… Full Game <n> Highlights" observed.
 
   # ---- Candidates (disabled; verify before enabling) ----
-  # Tennis TV titles announce results ("Continues Title Defence"); not used.
-  - { id: tennistv-youtube, sport: tennis, displayName: Tennis TV, tier: 2, platform: youtube, channelId: UCbcxFkd6B9xUU54InHv4Tig, enabled: false, regions: [US], competitions: [ATP], verification: { status: candidate } }
   - { id: wimbledon-youtube, sport: tennis, displayName: Wimbledon, tier: 2, platform: youtube, channelId: UCNa8NxMgSm7m4Ii9d4QGk1Q, enabled: false, regions: [US], competitions: [Wimbledon], verification: { status: candidate } }
   - { id: ausopen-youtube, sport: tennis, displayName: Australian Open, tier: 2, platform: youtube, channelId: UCeTKJSW1NTAkf27nNmjWt5A, enabled: false, regions: [US], competitions: [Australian Open], verification: { status: candidate } }
   - { id: rolandgarros-youtube, sport: tennis, displayName: Roland-Garros, tier: 2, platform: youtube, channelId: UCF3K1Jf8hjFW8qliei8fQ3A, enabled: false, regions: [US], competitions: [Roland-Garros], verification: { status: candidate } }

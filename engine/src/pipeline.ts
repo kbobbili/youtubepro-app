@@ -145,6 +145,8 @@ export async function discover(o: DiscoverOptions): Promise<DiscoverResult> {
 
   // 4. Match, screen, persist, and advance discovery state.
   const now = o.now();
+  // Preferred sources first (lower tier), e.g. Tennis TV before ATP Tour, a home board before Willow.
+  const sourceRank = (sourceId: string) => o.sources.find((s) => s.id === sourceId)?.tier ?? 9;
   const outcomes: EventOutcome[] = [];
   store.tx(() => {
     // Every looked-up candidate gets a metadata check and title screen, so 'unreviewed' exists only transiently.
@@ -201,11 +203,11 @@ export async function discover(o: DiscoverOptions): Promise<DiscoverResult> {
 
       const previous = store.getDiscovery(e.id)?.status;
       let status: DiscoveryStatus;
-      const primary = metadataOk ? store.selectPrimary(e.id, now) : undefined;
+      const primary = metadataOk ? store.selectPrimary(e.id, now, sourceRank) : undefined;
       if (primary) status = 'FOUND';
       else if (noSourceForCompetition) {
         status = 'UNAVAILABLE';
-        ineligible.add(`no_trusted_source:${adapter.sourceCompetition(e)}`);
+        ineligible.add(`no_trusted_source:${[adapter.sourceCompetition(e)].flat()[0]}`);
       } else if (!complete) status = previous && previous !== 'WAITING_FOR_EVENT_END' ? previous : 'SEARCHING'; // incomplete ≠ missing
       else if (Date.parse(now) > Date.parse(e.startTime) + adapter.estimatedDurationMs(e) + DISCOVERY_CUTOFF_MS) status = 'UNAVAILABLE';
       else status = 'SEARCHING';

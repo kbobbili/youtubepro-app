@@ -25,7 +25,7 @@ sports:
     enabled: true
     tour: atp
     rankThreshold: 30        # a match is followed when either player is ranked 30 or better
-    maxRankingAgeDays: 10    # ATP rankings update weekly; older snapshots make eligibility unknown
+    maxRankingAgeDays: 14    # ATP rankings are weekly and ESPN lags (snapshot was 10 days old on 2026-10-04); older = eligibility unknown
     priority: normal
 
   nba:

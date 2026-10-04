@@ -69,7 +69,7 @@ const COLLECTIONS: Collection[] = [
   { id: 'bills', title: 'Bills', kind: 'team', sport: 'nfl', team: 'BUF', keep: { last: 7 }, publish: true },
   { id: '49ers', title: '49ers', kind: 'team', sport: 'nfl', team: 'SF', keep: { last: 7 }, publish: true },
 ];
-const baseConfig: CollectionsConfig = { publishing: loaded.publishing, collections: COLLECTIONS };
+const baseConfig: CollectionsConfig = { publishing: { ...loaded.publishing, includeFlaggedTitles: false }, collections: COLLECTIONS };
 function options(over: { prefs?: Preferences; collections?: Partial<CollectionsConfig>; publishing?: Partial<CollectionsConfig['publishing']>; sources?: typeof sources } = {}): CatalogOptions {
   return {
     prefs: over.prefs ?? prefs,
