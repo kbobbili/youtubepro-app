@@ -163,7 +163,7 @@ describe('NFL discovery pipeline (recorded Week 3 fixtures)', () => {
 
 it('loads the committed config files', () => {
   expect(loadPreferences(root).sports.nfl?.teams.map((t) => t.abbr)).toEqual(['SF', 'BUF']);
-  expect(sources.filter((s) => s.enabled).map((s) => s.id)).toEqual(['nfl-youtube', 'f1-youtube', 'nbcsports-youtube', 'espnfc-youtube', 'atptour-youtube', 'willow-youtube']);
+  expect(sources.filter((s) => s.enabled).map((s) => s.id)).toEqual(['nfl-youtube', 'f1-youtube', 'nbcsports-youtube', 'espnfc-youtube', 'atptour-youtube', 'willow-youtube', 'nba-youtube', 'mlb-youtube']);
   expect(sources.filter((s) => s.enabled).every((s) => s.verification.status === 'verified')).toBe(true);
   expect(path.basename(root)).toBeTruthy();
 });

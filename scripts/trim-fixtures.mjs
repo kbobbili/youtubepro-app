@@ -13,6 +13,18 @@ const status = (s) => ({ type: pick(s?.type, ['name', 'state', 'completed', 'des
 
 function trimEspn(url, body) {
   const path = new URL(url).pathname;
+  if (path.includes('/basketball/nba/') || path.includes('/baseball/mlb/')) {
+    return {
+      events: (body.events ?? []).map((e) => ({
+        id: e.id, date: e.date, season: pick(e.season, ['year', 'type', 'slug']),
+        competitions: (e.competitions ?? []).slice(0, 1).map((c) => ({
+          status: status(c.status),
+          notes: (c.notes ?? []).map((n) => pick(n, ['headline'])),
+          competitors: c.competitors.map((x) => ({ homeAway: x.homeAway, team: pick(x.team, ['abbreviation', 'displayName', 'shortDisplayName', 'name']) })),
+        })),
+      })),
+    };
+  }
   if (path.includes('/racing/f1/')) {
     return {
       events: (body.events ?? []).map((e) => ({

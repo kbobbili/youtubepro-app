@@ -83,6 +83,13 @@ const Priority = z.enum(['must', 'high', 'normal', 'low']);
 /** A followed team by ESPN team ID (`name` is for readability). */
 const TeamPref = z.object({ id: z.string().min(1), name: z.string().min(1), priority: Priority });
 
+/** A league followed by team abbreviation (ESPN), with the season phases to include. */
+const LeaguePrefs = z.object({
+  enabled: z.boolean(),
+  teams: z.array(z.object({ abbr: z.string().min(1), name: z.string().min(1), priority: Priority })),
+  seasonTypes: z.array(z.enum(['preseason', 'regular', 'postseason'])).min(1),
+});
+
 const Preferences = z.object({
   region: z.string().length(2),
   sports: z.object({
@@ -105,6 +112,8 @@ const Preferences = z.object({
         priority: Priority,
       })
       .optional(),
+    nba: LeaguePrefs.optional(),
+    mlb: LeaguePrefs.optional(),
     cricket: z
       .object({
         enabled: z.boolean(),

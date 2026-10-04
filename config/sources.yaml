@@ -136,9 +136,41 @@ sources:
       evidenceUrl: https://www.icc-cricket.com/
       method: icc-cricket.com links https://www.youtube.com/@ICC, whose channel is UCt2JXOLNxqry7B_4rRZME3Q.
 
+  - id: nba-youtube
+    sport: nba
+    displayName: NBA
+    tier: 1
+    platform: youtube
+    channelId: UCWJ2lWNubArHWmf3FIHbfcQ
+    enabled: true
+    regions: [US]
+    competitions: [NBA]
+    verification:
+      status: verified
+      verifiedAt: "2026-10-03"
+      evidenceUrl: https://www.nba.com/
+      method: >-
+        nba.com links https://www.youtube.com/user/NBA, whose channel is UCWJ2lWNubArHWmf3FIHbfcQ (@NBA).
+        Coverage: "<AWAY> at <HOME> | … FULL GAME HIGHLIGHTS | <Month D, YYYY>" (preseason, playoffs, Finals) observed.
+
+  - id: mlb-youtube
+    sport: mlb
+    displayName: MLB
+    tier: 1
+    platform: youtube
+    channelId: UCoLrcjPV5PbUrUyXq5mjc_A
+    enabled: true
+    regions: [US]
+    competitions: [MLB]
+    verification:
+      status: verified
+      verifiedAt: "2026-10-03"
+      evidenceUrl: https://www.mlb.com/
+      method: >-
+        mlb.com links https://www.youtube.com/mlb, whose channel is UCoLrcjPV5PbUrUyXq5mjc_A (@MLB).
+        Coverage: "<AWAY> vs. <HOME>: Official Full Game Highlights (<Month D>)" and postseason "… Full Game <n> Highlights" observed.
+
   # ---- Candidates (disabled; verify before enabling) ----
-  - { id: nba-youtube, sport: nba, displayName: NBA, tier: 1, platform: youtube, channelId: UCWJ2lWNubArHWmf3FIHbfcQ, enabled: false, regions: [US], competitions: [NBA], verification: { status: candidate } }
-  - { id: mlb-youtube, sport: mlb, displayName: MLB, tier: 1, platform: youtube, channelId: UCoLrcjPV5PbUrUyXq5mjc_A, enabled: false, regions: [US], competitions: [MLB], verification: { status: candidate } }
   # Tennis TV titles announce results ("Continues Title Defence"); not used.
   - { id: tennistv-youtube, sport: tennis, displayName: Tennis TV, tier: 2, platform: youtube, channelId: UCbcxFkd6B9xUU54InHv4Tig, enabled: false, regions: [US], competitions: [ATP], verification: { status: candidate } }
   - { id: wimbledon-youtube, sport: tennis, displayName: Wimbledon, tier: 2, platform: youtube, channelId: UCNa8NxMgSm7m4Ii9d4QGk1Q, enabled: false, regions: [US], competitions: [Wimbledon], verification: { status: candidate } }

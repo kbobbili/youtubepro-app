@@ -87,3 +87,59 @@ collections:
     # Name order in ATP titles hints at the winner; accepted by the user (2026-10-03).
     keep: { tournaments: { finishedWithinDays: 7, fromStage: qf, majorsFromStage: r16 } }
     publish: true
+
+  - id: knicks
+    title: "SportsCenter · Knicks"
+    kind: team
+    sport: nba
+    team: NY
+    keep: { last: 7 }
+    publish: true
+
+  - id: warriors
+    title: "SportsCenter · Warriors"
+    kind: team
+    sport: nba
+    team: GS
+    keep: { last: 7 }
+    publish: true
+
+  - id: thunder
+    title: "SportsCenter · Thunder"
+    kind: team
+    sport: nba
+    team: OKC
+    keep: { last: 7 }
+    publish: true
+
+  - id: sixers
+    title: "SportsCenter · 76ers"
+    kind: team
+    sport: nba
+    team: PHI
+    keep: { last: 7 }
+    publish: true
+
+  - id: yankees
+    title: "SportsCenter · Yankees"
+    kind: team
+    sport: mlb
+    team: NYY
+    keep: { last: 7 }
+    publish: true
+
+  - id: dodgers
+    title: "SportsCenter · Dodgers"
+    kind: team
+    sport: mlb
+    team: LAD
+    keep: { last: 7 }
+    publish: true
+
+  - id: braves
+    title: "SportsCenter · Braves"
+    kind: team
+    sport: mlb
+    team: ATL
+    keep: { last: 7 }
+    publish: true

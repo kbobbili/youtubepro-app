@@ -1,5 +1,5 @@
 # Personal preferences. Configuration, not code: edit freely.
-# NFL teams use ESPN abbreviations; other teams use ESPN team IDs. `name` is for readability.
+# NFL, NBA and MLB teams use ESPN abbreviations; soccer and cricket teams use ESPN team IDs. `name` is for readability.
 # Priority (must > high > normal > low) orders capped mixed collections such as "This Week".
 region: US
 
@@ -27,6 +27,23 @@ sports:
     rankThreshold: 30        # a match is followed when either player is ranked 30 or better
     maxRankingAgeDays: 10    # ATP rankings update weekly; older snapshots make eligibility unknown
     priority: normal
+
+  nba:
+    enabled: true
+    seasonTypes: [regular, postseason]   # add preseason to include exhibition games
+    teams:
+      - { abbr: NY, name: New York Knicks, priority: high }
+      - { abbr: GS, name: Golden State Warriors, priority: high }
+      - { abbr: OKC, name: Oklahoma City Thunder, priority: high }
+      - { abbr: PHI, name: Philadelphia 76ers, priority: high }
+
+  mlb:
+    enabled: true
+    seasonTypes: [regular, postseason]
+    teams:
+      - { abbr: NYY, name: New York Yankees, priority: high }
+      - { abbr: LAD, name: Los Angeles Dodgers, priority: high }
+      - { abbr: ATL, name: Atlanta Braves, priority: high }
 
   cricket:
     enabled: true

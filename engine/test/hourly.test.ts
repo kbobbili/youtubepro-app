@@ -18,7 +18,7 @@ function simulate(fail: string[]): { code: number | null; steps: string[]; log: 
   return { code: res.status, steps: [...log.matchAll(/:: \[([\w-]+)\]/g)].map((m) => m[1]!), log };
 }
 
-const ALL = ['discover-nfl', 'discover-f1', 'discover-soccer', 'discover-tennis', 'discover-cricket', 'snapshot', 'catalog', 'publish', 'diagnostic'];
+const ALL = ['discover-nfl', 'discover-f1', 'discover-soccer', 'discover-tennis', 'discover-cricket', 'discover-nba', 'discover-mlb', 'snapshot', 'catalog', 'publish', 'diagnostic'];
 
 describe.skipIf(process.platform !== 'win32')('hourly chain (per-collection failure isolation)', () => {
   it('runs every step and exits 0 when all succeed', () => {

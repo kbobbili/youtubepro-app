@@ -51,6 +51,8 @@ $personal = @(
   @{ name = 'discover-soccer'; args = @('discover', 'soccer', '--days', '7', '--kind', 'prospective') },
   @{ name = 'discover-tennis'; args = @('discover', 'tennis', '--days', '7', '--kind', 'prospective') },
   @{ name = 'discover-cricket'; args = @('discover', 'cricket', '--days', '7', '--kind', 'prospective') },
+  @{ name = 'discover-nba'; args = @('discover', 'nba', '--days', '7', '--kind', 'prospective') },
+  @{ name = 'discover-mlb'; args = @('discover', 'mlb', '--days', '7', '--kind', 'prospective') },
   @{ name = 'snapshot'; args = @('snapshot') },
   # Catalog revalidates retained videos (YouTube API key); incomplete collections are recorded inside it.
   @{ name = 'catalog'; args = @('catalog'); gate = $true },
