@@ -47,6 +47,7 @@ function Invoke-Step([string]$name, [string[]]$engineArgs) {
 # Personal chain, in order. One discover step per sport.
 $personal = @(
   @{ name = 'discover-nfl'; args = @('discover', 'nfl', '--days', '7', '--kind', 'prospective') },
+  @{ name = 'discover-f1'; args = @('discover', 'f1', '--days', '7', '--kind', 'prospective') },
   @{ name = 'snapshot'; args = @('snapshot') },
   # Catalog revalidates retained videos (YouTube API key); incomplete collections are recorded inside it.
   @{ name = 'catalog'; args = @('catalog'); gate = $true }

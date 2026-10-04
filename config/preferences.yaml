@@ -1,5 +1,6 @@
 # Personal preferences. Configuration, not code: edit freely.
-# Teams use ESPN abbreviations; `name` is for readability.
+# NFL teams use ESPN abbreviations; other teams use ESPN team IDs. `name` is for readability.
+# Priority (must > high > normal > low) orders capped mixed collections such as "This Week".
 region: US
 
 sports:
@@ -8,3 +9,35 @@ sports:
     teams:
       - { abbr: SF, name: San Francisco 49ers, priority: high }
       - { abbr: BUF, name: Buffalo Bills, priority: high }
+
+  f1:
+    enabled: true
+    sessions: [race]
+    priority: normal
+
+  soccer:
+    enabled: true
+    teams:
+      - { id: "359", name: Arsenal, priority: high }
+      - { id: "86", name: Real Madrid, priority: high }
+
+  tennis:
+    enabled: true
+    tour: atp
+    rankThreshold: 30        # a match is followed when either player is ranked 30 or better
+    maxRankingAgeDays: 10    # ATP rankings update weekly; older snapshots make eligibility unknown
+    priority: normal
+
+  cricket:
+    enabled: true
+    formats: [ODI, T20I]     # men's internationals; Tests deferred
+    includeIcc: true
+    teams:
+      - { id: "6", name: India, priority: must }
+      - { id: "2", name: Australia, priority: normal }
+      - { id: "1", name: England, priority: normal }
+      - { id: "3", name: South Africa, priority: normal }
+      - { id: "5", name: New Zealand, priority: normal }
+      - { id: "7", name: Pakistan, priority: normal }
+      - { id: "8", name: Sri Lanka, priority: normal }
+      - { id: "4", name: West Indies, priority: normal }

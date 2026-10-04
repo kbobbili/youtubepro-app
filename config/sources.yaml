@@ -7,6 +7,10 @@
 #
 # Candidate IDs came from desk research on 2026-10-02 (@handle → channel ID → RSS title).
 # They are NOT trusted until ownership evidence is recorded.
+#
+# Ownership and coverage are separate checks. `competitions` scopes each source to what it was observed
+# to publish (adapter keys: NFL, F1, ESPN league slugs, atp, cricket series:<ESPN series id>). Events in any
+# other competition get "no trusted source" (highlight unavailable), never a guessed source.
 
 sources:
   - id: nfl-youtube
@@ -26,17 +30,121 @@ sources:
         nfl.com footer "Youtube" link → https://www.youtube.com/user/NFL/ ;
         YouTube channels.list(forUsername=NFL) → UCDVYQ4Zhbm3S2dlz7P1GBDg (@nfl).
 
+  - id: f1-youtube
+    sport: f1
+    displayName: Formula 1
+    tier: 1
+    platform: youtube
+    channelId: UCB_qr75-ydFVKSF9Dmo6izg
+    enabled: true
+    regions: [US]
+    competitions: [F1]
+    verification:
+      status: verified
+      verifiedAt: "2026-10-03"
+      evidenceUrl: https://www.formula1.com/
+      method: >-
+        formula1.com links https://www.youtube.com/c/f1, whose canonical channel is UCB_qr75-ydFVKSF9Dmo6izg (@formula1).
+        Coverage: "Race Highlights | 2026 <GP>" uploads observed for the Italian, Spanish and Azerbaijan GPs.
+
+  - id: nbcsports-youtube
+    sport: soccer
+    displayName: NBC Sports
+    tier: 3
+    platform: youtube
+    channelId: UCqZQlzSHbVJrwrn5XvzrzcA
+    enabled: true
+    regions: [US]
+    competitions: [eng.1]
+    verification:
+      status: verified
+      verifiedAt: "2026-10-03"
+      evidenceUrl: https://www.nbcsports.com/
+      method: >-
+        nbcsports.com links https://www.youtube.com/nbcsports, whose canonical channel is UCqZQlzSHbVJrwrn5XvzrzcA.
+        Coverage (US Premier League rights holder): "<Home> v. <Away> | PREMIER LEAGUE HIGHLIGHTS | M/D/YYYY | NBC Sports" observed for matchweek 5.
+
+  - id: espnfc-youtube
+    sport: soccer
+    displayName: ESPN FC
+    tier: 3
+    platform: youtube
+    channelId: UC6c1z7bA__85CIWZ_jpCK-Q
+    enabled: true
+    regions: [US]
+    competitions: [esp.1]
+    verification:
+      status: verified
+      verifiedAt: "2026-10-03"
+      evidenceUrl: https://www.espn.com/soccer/
+      method: >-
+        espn.com/soccer links playlist PLVWqRc88TLrAfU4-FedpO9jPX0OavZv0k, owned by channel UC6c1z7bA__85CIWZ_jpCK-Q (@espnfc).
+        Coverage (US LaLiga rights holder): "<Home> vs. <Away> | LALIGA Highlights | ESPN FC" observed for Real Madrid matches.
+
+  - id: atptour-youtube
+    sport: tennis
+    displayName: ATP Tour
+    tier: 1
+    platform: youtube
+    channelId: UCY_5h5zaSwN7Or4kIJDYNXA
+    enabled: true
+    regions: [US]
+    competitions: [atp]
+    verification:
+      status: verified
+      verifiedAt: "2026-10-03"
+      evidenceUrl: https://www.atptour.com/en/
+      method: >-
+        atptour.com footer links https://www.youtube.com/channel/UCY_5h5zaSwN7Or4kIJDYNXA (@atptour).
+        Coverage: "<A> vs <B> Highlights | <City> 2026 <Round>" for Tokyo and Beijing main-draw matches. Grand Slams are not on this channel.
+
+  - id: willow-youtube
+    sport: cricket
+    displayName: Willow
+    tier: 3
+    platform: youtube
+    channelId: UC2V_LHwvaNS2XWZ5l8x3jLQ
+    enabled: true
+    regions: [US]
+    # Series-specific coverage evidence only (never a blanket bilateral rule). Add a series when Willow is
+    # observed publishing its highlights; discovery reports uncovered series as no_trusted_source:series:<id>.
+    competitions: [series:24289, series:24203, series:23802, series:24677]
+    verification:
+      status: verified
+      verifiedAt: "2026-10-03"
+      evidenceUrl: https://www.willow.tv/
+      method: >-
+        willow.tv links https://www.youtube.com/@willow, whose channel is UC2V_LHwvaNS2XWZ5l8x3jLQ ("Willow by Cricbuzz"; resolves the
+        @WillowTVCricket ambiguity, that handle does not exist). Coverage observed 2026-10-03: West Indies tour of India (24289),
+        Australia tour of South Africa (24203), Sri Lanka tour of England (23802), Afghanistan tour of India (24677).
+        Not observed: Australia tour of Zimbabwe (24303), Asian Games (22547).
+
+  - id: icc-youtube
+    sport: cricket
+    displayName: ICC
+    tier: 1
+    platform: youtube
+    channelId: UCt2JXOLNxqry7B_4rRZME3Q
+    # Ownership verified, but no men's ICC event involving followed nations is in scope yet, and ICC titles often
+    # carry results ("Japan run India close"). Enable per ICC competition when one is scheduled.
+    enabled: false
+    regions: [US]
+    competitions: [icc]
+    verification:
+      status: verified
+      verifiedAt: "2026-10-03"
+      evidenceUrl: https://www.icc-cricket.com/
+      method: icc-cricket.com links https://www.youtube.com/@ICC, whose channel is UCt2JXOLNxqry7B_4rRZME3Q.
+
   # ---- Candidates (disabled; verify before enabling) ----
   - { id: nba-youtube, sport: nba, displayName: NBA, tier: 1, platform: youtube, channelId: UCWJ2lWNubArHWmf3FIHbfcQ, enabled: false, regions: [US], competitions: [NBA], verification: { status: candidate } }
   - { id: mlb-youtube, sport: mlb, displayName: MLB, tier: 1, platform: youtube, channelId: UCoLrcjPV5PbUrUyXq5mjc_A, enabled: false, regions: [US], competitions: [MLB], verification: { status: candidate } }
-  - { id: f1-youtube, sport: f1, displayName: Formula 1, tier: 1, platform: youtube, channelId: UCB_qr75-ydFVKSF9Dmo6izg, enabled: false, regions: [US], competitions: [F1], verification: { status: candidate } }
-  - { id: icc-youtube, sport: cricket, displayName: ICC, tier: 1, platform: youtube, channelId: UCt2JXOLNxqry7B_4rRZME3Q, enabled: false, regions: [US], competitions: [ICC], verification: { status: candidate } }
+  # Tennis TV titles announce results ("Continues Title Defence"); not used.
   - { id: tennistv-youtube, sport: tennis, displayName: Tennis TV, tier: 2, platform: youtube, channelId: UCbcxFkd6B9xUU54InHv4Tig, enabled: false, regions: [US], competitions: [ATP], verification: { status: candidate } }
   - { id: wimbledon-youtube, sport: tennis, displayName: Wimbledon, tier: 2, platform: youtube, channelId: UCNa8NxMgSm7m4Ii9d4QGk1Q, enabled: false, regions: [US], competitions: [Wimbledon], verification: { status: candidate } }
   - { id: ausopen-youtube, sport: tennis, displayName: Australian Open, tier: 2, platform: youtube, channelId: UCeTKJSW1NTAkf27nNmjWt5A, enabled: false, regions: [US], competitions: [Australian Open], verification: { status: candidate } }
   - { id: rolandgarros-youtube, sport: tennis, displayName: Roland-Garros, tier: 2, platform: youtube, channelId: UCF3K1Jf8hjFW8qliei8fQ3A, enabled: false, regions: [US], competitions: [Roland-Garros], verification: { status: candidate } }
   - { id: usopen-tennis-youtube, sport: tennis, displayName: US Open Tennis, tier: 2, platform: youtube, channelId: UCXbboag48Qlr78zzz6SkzkQ, enabled: false, regions: [US], competitions: [US Open], verification: { status: candidate } }
-  - { id: nbcsports-youtube, sport: soccer, displayName: NBC Sports, tier: 3, platform: youtube, channelId: UCqZQlzSHbVJrwrn5XvzrzcA, enabled: false, regions: [US], competitions: [EPL], verification: { status: candidate } }
   - { id: fifa-youtube, sport: soccer, displayName: FIFA, tier: 2, platform: youtube, channelId: UCpcTrCXblq78GZrTUTLWeBw, enabled: false, regions: [US], competitions: [FIFA], verification: { status: candidate } }
+  # No US-accessible Champions League match highlights found on UEFA, CBS Sports Golazo, Paramount+, CBS Sports or TNT (2026-10-03).
   - { id: uefa-youtube, sport: soccer, displayName: UEFA, tier: 2, platform: youtube, channelId: UCyGa1YEx9ST66rYrJTGIKOw, enabled: false, regions: [US], competitions: [UEFA], verification: { status: candidate } }
-  - { id: willow-youtube, sport: cricket, displayName: Willow, tier: 3, platform: youtube, channelId: UC2V_LHwvaNS2XWZ5l8x3jLQ, enabled: false, regions: [US], competitions: [Bilateral], verification: { status: candidate, notes: "Ambiguous: @willow (UC2V_LHwvaNS2XWZ5l8x3jLQ, 'Willow by Cricbuzz') vs @WillowTVCricket (UCg_FrRwaLBTjxPuUFas4j9w). Confirm on willow.tv." } }

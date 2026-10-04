@@ -5,7 +5,7 @@ import { ADAPTERS } from './adapters/index.ts';
 import type { SportAdapter } from './adapters/types.ts';
 import { trustedSources, type Collection, type CollectionsConfig, type Preferences, type Source } from './config.ts';
 import type { RunStatus, SportEvent } from './domain.ts';
-import { revalidateVideos, type RevalidationResult } from './revalidate.ts';
+import { rescreenOutdated, revalidateVideos, type RevalidationResult } from './revalidate.ts';
 import { SCREENING_VERSION } from './spoilers.ts';
 import { rowToEvent, type EventRow, type Store } from './store.ts';
 import type { YouTubeClient } from './youtube/client.ts';
@@ -233,9 +233,11 @@ export function buildCatalog(store: Store, o: CatalogOptions, revalidation: Reva
 export async function generateCatalog(store: Store, youtube: YouTubeClient | undefined, o: CatalogOptions): Promise<{ catalog: CatalogSnapshot; revalidation: RevalidationResult }> {
   const rows = followedRows(store, o).filter((f) => f.row.video_id);
   const sportOf = new Map(rows.map((f) => [f.row.video_id!, f.row.sport]));
+  const sportFor = (id: string) => sportOf.get(id) ?? 'unknown';
   const revalidation = await revalidateVideos(store, youtube, [...sportOf.keys()], {
-    region: o.prefs.region, sportOf: (id) => sportOf.get(id) ?? 'unknown', now: o.now, maxAgeMs: o.collections.publishing.maxMetadataAgeHours * 3_600_000,
+    region: o.prefs.region, sportOf: sportFor, now: o.now, maxAgeMs: o.collections.publishing.maxMetadataAgeHours * 3_600_000,
   });
+  store.tx(() => rescreenOutdated(store, [...sportOf.keys()], sportFor, o.now));
   return { catalog: buildCatalog(store, o, revalidation), revalidation };
 }
 

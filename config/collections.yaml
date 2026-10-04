@@ -24,6 +24,14 @@ collections:
     cap: 50
     publish: true                 # the first and only published collection until the Onn gate passes
 
+  - id: f1
+    title: "SportsCenter · F1"
+    kind: sport
+    sport: f1
+    windowDays: 30
+    cap: 30
+    publish: false
+
   - id: this-week
     title: "SportsCenter · This Week"
     kind: mixed

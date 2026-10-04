@@ -25,6 +25,24 @@ export function recordMetadataChecks(store: Store, ids: string[], metadata: Map<
   }
 }
 
+/**
+ * Re-screen stored current titles whose screen is missing or from an older screening version. Local only
+ * (no API call), so a rules change never hides published items while waiting for the metadata refresh.
+ */
+export function rescreenOutdated(store: Store, videoIds: string[], sportOf: (videoId: string) => string, at: string): number {
+  let n = 0;
+  for (const videoId of new Set(videoIds)) {
+    const check = store.videoCheck(videoId);
+    if (!check?.title || !check.titleFingerprint) continue;
+    const prev = store.titleScreen(videoId);
+    const screen = screenTitle(check.title, sportOf(videoId));
+    if (prev?.titleFingerprint === check.titleFingerprint && prev.version === screen.version) continue;
+    store.recordTitleScreen({ videoId, titleFingerprint: check.titleFingerprint, version: screen.version, status: screen.status, reasons: screen.reasons, at });
+    n++;
+  }
+  return n;
+}
+
 export interface RevalidationResult {
   /** IDs refreshed by this call. */
   refreshed: string[];
