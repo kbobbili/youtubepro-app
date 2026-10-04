@@ -42,6 +42,8 @@ export interface EventFetchResult {
   complete: boolean;
   issues: string[];
   requests: number;
+  /** Informational notes that do not make the run incomplete (e.g. a still-fresh cached snapshot was used). */
+  notes?: string[];
 }
 
 export interface FollowDecision {

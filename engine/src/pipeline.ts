@@ -38,6 +38,8 @@ export interface DiscoverResult {
   sport: string;
   status: RunStatus;
   issues: RunIssue[];
+  /** Informational (e.g. cached rankings used); does not affect status. */
+  notes: string[];
   window: Window;
   scans: (Pick<UploadScan, 'pages' | 'complete' | 'stopReason' | 'error'> & { sourceId: string; since: string; items: number })[];
   outcomes: EventOutcome[];
@@ -228,5 +230,5 @@ export async function discover(o: DiscoverOptions): Promise<DiscoverResult> {
   const status: RunStatus = !fetched.complete && fetched.events.length === 0 ? 'failed' : issues.length ? 'incomplete' : 'ok';
   const quota = { calls: { ...youtube.ledger.calls, espn: fetched.requests }, estimatedUnits: youtube.ledger.units };
   store.finishRun(o.runId, o.now(), status, issues, quota);
-  return { runId: o.runId, sport, status, issues, window, scans, outcomes, quota };
+  return { runId: o.runId, sport, status, issues, notes: fetched.notes ?? [], window, scans, outcomes, quota };
 }

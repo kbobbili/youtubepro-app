@@ -18,6 +18,18 @@ export function sameTokens(a: string, b: string): boolean {
   return ta.length > 0 && ta === normalizeName(b).split(' ').sort().join(' ');
 }
 
+/**
+ * A title's name refers to a full provider name: same words in any order, or (for shortened names such as
+ * "Coleman Wong" for "Chak Lam Coleman Wong") at least two words that all appear in the full name.
+ * A single word (a bare surname) is never enough, so shared surnames cannot match each other.
+ */
+export function nameRefersTo(titleName: string, fullName: string): boolean {
+  if (sameTokens(titleName, fullName)) return true;
+  const t = normalizeName(titleName).split(' ').filter(Boolean);
+  const full = new Set(normalizeName(fullName).split(' '));
+  return t.length >= 2 && t.every((w) => full.has(w));
+}
+
 /** Whole-word suffix: "intense madrid derby atletico madrid" ends with "atletico madrid". */
 export function endsWithName(text: string, name: string): boolean {
   const t = normalizeName(text);
@@ -32,9 +44,9 @@ export const MIN_HIGHLIGHT_SECONDS = 120;
  * Shared identity-independent checks: published after the event started, not a short clip, and within
  * `maxDelayHours` of estimated end. Returns a rejection, or undefined when the candidate may proceed.
  */
-export function timingRejection(e: SportEvent, input: MatchInput, estimatedDurationMs: number, maxDelayHours = 72): string | undefined {
+export function timingRejection(e: SportEvent, input: MatchInput, estimatedDurationMs: number, maxDelayHours = 72, minSeconds = MIN_HIGHLIGHT_SECONDS): string | undefined {
   if (input.publishedAt < e.startTime) return 'published_before_event';
-  if (input.durationSeconds !== undefined && input.durationSeconds < MIN_HIGHLIGHT_SECONDS) return 'too_short';
+  if (input.durationSeconds !== undefined && input.durationSeconds < minSeconds) return 'too_short';
   const delayHours = (Date.parse(input.publishedAt) - (Date.parse(e.startTime) + estimatedDurationMs)) / 3_600_000;
   if (delayHours > maxDelayHours) return 'published_too_late';
   return undefined;

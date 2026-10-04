@@ -98,6 +98,7 @@ function printDiscover(r: DiscoverResult, cohort: Cohort): void {
   );
   console.log('Target-TV playback: NOT_TESTED for all (metadata screening is not playback evidence).');
   console.log(`Quota: ${JSON.stringify(r.quota.calls)} ≈ ${r.quota.estimatedUnits} YouTube units`);
+  for (const n of r.notes) console.log(`NOTE ${n}`);
   for (const i of r.issues) console.log(`ISSUE [${i.stage}] ${i.message}`);
 }
 

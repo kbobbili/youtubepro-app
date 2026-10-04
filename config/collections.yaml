@@ -40,6 +40,14 @@ collections:
     cap: 30
     publish: false
 
+  - id: tennis
+    title: "SportsCenter · Tennis"
+    kind: sport
+    sport: tennis
+    windowDays: 30
+    cap: 30
+    publish: false
+
   - id: this-week
     title: "SportsCenter · This Week"
     kind: mixed
