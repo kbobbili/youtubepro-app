@@ -559,6 +559,14 @@ export class Store {
 
   // ---- v2: revalidation, title screening, publishing ------------------------
 
+  getMeta(key: string): string | undefined {
+    return (this.db.prepare('SELECT value FROM engine_meta WHERE key = ?').get(key) as { value: string } | undefined)?.value;
+  }
+
+  setMeta(key: string, value: string): void {
+    this.db.prepare('INSERT INTO engine_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value);
+  }
+
   /** Stable engine install ID, durably created on first use (before any remote creation relies on it). */
   installId(create: () => string): string {
     this.db.prepare("INSERT OR IGNORE INTO engine_meta (key, value) VALUES ('install_id', ?)").run(create());

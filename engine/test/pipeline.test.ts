@@ -8,6 +8,7 @@ import type { NflEvent } from '../src/domain.ts';
 import { discover, type EventOutcome } from '../src/pipeline.ts';
 import { buildReport } from '../src/report.ts';
 import { buildSnapshot } from '../src/snapshot.ts';
+import { quotaExhausted } from '../src/quota.ts';
 import { Store } from '../src/store.ts';
 import { YouTubeClient } from '../src/youtube/client.ts';
 import { fixtureTransport, overriding, W3, w3Transport } from './helpers.ts';
@@ -116,6 +117,7 @@ describe('NFL discovery pipeline (recorded Week 3 fixtures)', () => {
     expect(r.status).toBe('incomplete');
     expect(r.outcomes.map((o) => o.discovery)).toEqual(['SEARCHING', 'SEARCHING']);
     expect(buildReport(store, 'personal').incompleteOnly).toBe(2);
+    expect(quotaExhausted(store, AFTER_CUTOFF)).toMatchObject({ source: 'discover:nfl' }); // the rest of the day skips YouTube work
   });
 
   it('a failed ESPN fetch is a failed run, not a zero-event success', async () => {

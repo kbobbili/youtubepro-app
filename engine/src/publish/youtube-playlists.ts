@@ -1,7 +1,9 @@
 import { CatalogSnapshot, type CatalogCollection } from '@sportscenter/contracts';
 import type { CollectionsConfig } from '../config.ts';
 import { HttpError, sanitizeUrl } from '../http.ts';
+import { markQuotaExhausted, quotaDay, quotaExhausted } from '../quota.ts';
 import type { Store } from '../store.ts';
+import { QuotaExceededError } from '../youtube/client.ts';
 import type { ApiTransport } from '../youtube/oauth.ts';
 
 /**
@@ -20,10 +22,7 @@ export const COST = { list: 1, write: 50 } as const;
 
 export class BudgetExceededError extends Error {}
 
-/** Pacific-time quota day (YouTube resets quota at midnight Pacific). */
-export function quotaDay(iso: string): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));
-}
+export { quotaDay };
 
 export function playlistMarker(installId: string, collectionId: string): string {
   return `[sportscenter install=${installId} collection=${collectionId}]`;
@@ -141,6 +140,8 @@ class PublishApi {
       this.persist(this.calls, this.units);
       const res = await this.transport({ method, url, body });
       if (res.status >= 200 && res.status < 300) return res.body;
+      const reason = (res.body as { error?: { errors?: { reason?: string }[] } })?.error?.errors?.[0]?.reason;
+      if (res.status === 403 && (reason === 'quotaExceeded' || reason === 'dailyLimitExceeded')) throw new QuotaExceededError(`YouTube quota exceeded (${method} ${endpoint})`);
       last = new HttpError(res.status, sanitizeUrl(url), res.body);
       if (res.status !== 429 && res.status < 500) break;
     }
@@ -252,6 +253,17 @@ export async function syncPlaylists(o: SyncOptions): Promise<SyncReport> {
   let status: SyncReport['status'] = 'ok';
   let channelId: string | undefined;
 
+  const exhausted = quotaExhausted(store, startedAt);
+  if (exhausted) {
+    const report: SyncReport = {
+      runId: o.runId, mode, status: 'budget_limited', quotaDay: day, catalogGeneratedAt: catalog.generatedAt, titleOverrides: catalog.titleOverrides, collections: [], calls: {}, units: 0,
+      budget: { daily: config.publishing.dailyBudgetUnits, usedBefore, remainingAfter: 0, remainingWrites: 0 },
+      issues: [`YouTube quota exhausted for ${exhausted.day} (by ${exhausted.source} at ${exhausted.at}); publishing resumes after midnight Pacific`],
+    };
+    store.finishPublishRun(o.runId, o.now(), 'budget_limited', report);
+    return report;
+  }
+
   const catalogAgeH = (Date.parse(startedAt) - Date.parse(catalog.generatedAt)) / 3_600_000;
   const catalogStale = catalogAgeH > config.publishing.maxMetadataAgeHours;
   if (catalogStale) issues.push(`catalog is ${catalogAgeH.toFixed(1)}h old (max ${config.publishing.maxMetadataAgeHours}h): treated as incomplete`);
@@ -278,7 +290,7 @@ export async function syncPlaylists(o: SyncOptions): Promise<SyncReport> {
       try {
         await syncCollection(api, store, o, col.title, entry, catalogStale, channelId, installId, report);
       } catch (err) {
-        if (err instanceof BudgetExceededError) throw err;
+        if (err instanceof BudgetExceededError || err instanceof QuotaExceededError) throw err;
         report.outcome = 'failed';
         report.notes.push((err as Error).message);
       }
@@ -287,9 +299,11 @@ export async function syncPlaylists(o: SyncOptions): Promise<SyncReport> {
       }
     }
   } catch (err) {
-    if (err instanceof BudgetExceededError) {
+    if (err instanceof BudgetExceededError || err instanceof QuotaExceededError) {
       status = 'budget_limited';
-      issues.push(err.message);
+      issues.push(`${err.message}; publishing resumes after midnight Pacific`);
+      // Only YouTube's own signal stops all YouTube work for the day; the publisher's budget only stops publishing.
+      if (err instanceof QuotaExceededError) markQuotaExhausted(store, o.now(), 'publish');
       const last = reports[reports.length - 1];
       if (last && last.outcome !== 'failed') last.outcome = 'partial';
     } else {
@@ -400,8 +414,8 @@ async function syncCollection(
       store.setPublishPlaylist(tracked, o.now());
       report.applied.creates = 1;
     } catch (err) {
-      if (err instanceof BudgetExceededError || isDefiniteFailure(err)) store.deletePublishPlaylist(id); // not sent, or definitely rejected
-      if (err instanceof BudgetExceededError) throw err;
+      if (err instanceof BudgetExceededError || err instanceof QuotaExceededError || isDefiniteFailure(err)) store.deletePublishPlaylist(id); // not sent, or definitely rejected
+      if (err instanceof BudgetExceededError || err instanceof QuotaExceededError) throw err;
       report.outcome = isDefiniteFailure(err) ? 'failed' : 'creation_pending';
       report.notes.push(`playlist creation ${isDefiniteFailure(err) ? 'rejected' : 'outcome unknown'}: ${(err as Error).message}`);
       return;
@@ -460,7 +474,7 @@ async function syncCollection(
       }
       done++;
     } catch (err) {
-      if (err instanceof BudgetExceededError) {
+      if (err instanceof BudgetExceededError || err instanceof QuotaExceededError) {
         report.backlog = ops.length - done;
         throw err;
       }

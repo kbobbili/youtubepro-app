@@ -1,6 +1,7 @@
 import { screenTitle, titleFingerprint } from './spoilers.ts';
 import type { Store } from './store.ts';
-import type { VideoMetadata, YouTubeClient } from './youtube/client.ts';
+import { markQuotaExhausted } from './quota.ts';
+import { QuotaExceededError, type VideoMetadata, type YouTubeClient } from './youtube/client.ts';
 import { screenVideo } from './youtube/screen.ts';
 
 /**
@@ -73,6 +74,7 @@ export async function revalidateVideos(
     store.tx(() => recordMetadataChecks(store, due, metadata, o.region, o.sportOf, o.now));
     return { refreshed: due, stale: [] };
   } catch (err) {
+    if (err instanceof QuotaExceededError) markQuotaExhausted(store, o.now, 'catalog');
     return { refreshed: [], stale: due, error: (err as Error).message };
   }
 }

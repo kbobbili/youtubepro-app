@@ -2,6 +2,7 @@ import type { SportAdapter } from './adapters/types.ts';
 import { trustedSources, type Preferences, type Source } from './config.ts';
 import type { Cohort, DiscoveryStatus, RunIssue, RunKind, RunStatus, SportEvent, Window } from './domain.ts';
 import type { Transport } from './http.ts';
+import { markQuotaExhausted } from './quota.ts';
 import { recordMetadataChecks } from './revalidate.ts';
 import type { Store } from './store.ts';
 import { parseIsoDuration, QuotaExceededError, type UploadItem, type UploadScan, type VideoMetadata, YouTubeClient } from './youtube/client.ts';
@@ -136,9 +137,11 @@ export async function discover(o: DiscoverOptions): Promise<DiscoverResult> {
       metadata = await youtube.videos(ids);
     } catch (err) {
       metadataOk = false;
+      quotaExhausted ||= err instanceof QuotaExceededError;
       issues.push({ stage: 'youtube', message: `videos.list failed: ${(err as Error).message}` });
     }
   } else if (ids.length) metadataOk = false;
+  if (quotaExhausted) markQuotaExhausted(store, o.now(), `discover:${sport}`);
 
   // 4. Match, screen, persist, and advance discovery state.
   const now = o.now();

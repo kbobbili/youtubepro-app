@@ -10,6 +10,7 @@ import { liveTransport, recordingTransport, replayTransport, type Transport } fr
 import { adapterFor, ADAPTERS } from './adapters/index.ts';
 import { discover, type DiscoverResult } from './pipeline.ts';
 import { retirePlaylist, syncPlaylists, type SyncReport } from './publish/youtube-playlists.ts';
+import { quotaExhausted } from './quota.ts';
 import { buildReport } from './report.ts';
 import { buildSnapshot, writeSnapshot } from './snapshot.ts';
 import { Store } from './store.ts';
@@ -158,6 +159,11 @@ async function main(argv: string[]): Promise<number> {
       return withLock(ENGINE_LOCK, async () => {
         const store = new Store(dbFile);
         try {
+          const exhausted = !values.replay && quotaExhausted(store, now());
+          if (exhausted) {
+            console.log(`Skipping ${adapter.sport} discovery: YouTube quota exhausted for ${exhausted.day} (by ${exhausted.source}); resumes after midnight Pacific.`);
+            return 0;
+          }
           const result = await discover({
             adapter, store, eventsTransport: transport, youtube: new YouTubeClient(transport, apiKey), sources: loadSources(root),
             prefs: loadPreferences(root), window, cohort, kind, maxScanPages: kind === 'backfill' ? 60 : 20, runId: `${now().slice(0, 19).replace(/[:T]/g, '')}-${randomUUID().slice(0, 8)}`, now,
@@ -216,7 +222,9 @@ ${r.sport.toUpperCase()} report  cohort=${r.cohort}  kind=${r.kind}`);
       return withLock(ENGINE_LOCK, async () => {
         const store = new Store(dbFile);
         try {
-          const youtube = values.offline ? undefined : new YouTubeClient(liveTransport(), youtubeApiKey());
+          const exhausted = quotaExhausted(store, now());
+          if (exhausted) console.log(`YouTube quota exhausted for ${exhausted.day}: rebuilding the catalog locally (no metadata refresh).`);
+          const youtube = values.offline || exhausted ? undefined : new YouTubeClient(liveTransport(), youtubeApiKey());
           const { catalog, revalidation } = await generateCatalog(store, youtube, {
             prefs: loadPreferences(root), sources: loadSources(root), collections: loadCollections(root), now: now(), configRevision: configRevision(root),
           });

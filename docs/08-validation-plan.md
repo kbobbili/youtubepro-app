@@ -80,7 +80,7 @@ Sequencing (user decision 2026-10-03): F1, soccer, tennis and cricket are built 
 
 **Failure isolation (per collection, 2026-10-03):** each sport's discovery runs independently. A failed, incomplete or stopped discovery (latest run older than `maxDiscoveryAgeHours`) marks only that sport's collections, and mixed collections containing it, incomplete; the publisher keeps those playlists as last-known-good and still updates healthy ones. Only a catalog that fails to build blocks publishing. Any failed step makes the hourly run exit non-zero.
 
-**Publish budget:** a safety rail at 8,000 of the project's default 10,000 daily units, reserving headroom for discovery, rather than a throttle.
+**Quota (user decision 2026-10-03):** the publisher may use the full 10,000-unit project quota. When YouTube reports the quota exhausted (discovery, catalog refresh or publishing), discovery and publishing skip for the rest of that Pacific day and resume automatically after midnight Pacific; the catalog still rebuilds locally. Nothing is lost: discovery scans back to every event it is still searching for.
 
 **Sport status (2026-10-03, live backfills audited match by match):**
 

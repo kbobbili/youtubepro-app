@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { loadCollections, repoRoot, type Collection, type CollectionsConfig } from '../src/config.ts';
 import type { JsonResponse } from '../src/http.ts';
 import { planSync, playlistMarker, quotaDay, retirePlaylist, syncPlaylists, type RemoteItem, type SyncOptions } from '../src/publish/youtube-playlists.ts';
+import { quotaExhausted } from '../src/quota.ts';
 import { Store } from '../src/store.ts';
 import type { ApiRequest, ApiTransport } from '../src/youtube/oauth.ts';
 
@@ -407,5 +408,31 @@ describe('syncPlaylists', () => {
     expect(tracked(store)).toBeUndefined();
     expect(yt.playlists.has(own.id)).toBe(true);
     expect((await retirePlaylist({ store, transport: yt.transport, config: config(), collectionId: 'nfl', runId: 'ret-3', now: () => NOW })).outcome).toBe('refused');
+  });
+
+  it("YouTube's quota-exceeded response stops publishing for the day; it resumes after midnight Pacific", async () => {
+    const store = new Store(':memory:');
+    const yt = new FakeYouTube();
+    await sync(store, yt, catalog(['a']));
+    // The next insert gets YouTube's quota error.
+    let quotaHit = false;
+    const original = yt.transport;
+    yt.transport = async (req) => {
+      if (!quotaHit && req.method === 'POST' && req.url.pathname.endsWith('/playlistItems')) {
+        quotaHit = true;
+        return { status: 403, body: { error: { errors: [{ reason: 'quotaExceeded' }] } } };
+      }
+      return original(req);
+    };
+    let r = await sync(store, yt, catalog(['a', 'b']));
+    expect(r.status).toBe('budget_limited');
+    expect(quotaExhausted(store, NOW)).toMatchObject({ source: 'publish' });
+    const calls = yt.requests.length;
+    r = await sync(store, yt, catalog(['a', 'b']), { now: '2026-10-10T20:00:00.000Z' }); // same Pacific day
+    expect(r).toMatchObject({ status: 'budget_limited', units: 0 });
+    expect(yt.requests.length).toBe(calls); // no YouTube calls at all
+    r = await sync(store, yt, catalog(['a', 'b'], {}, '2026-10-11T07:30:00.000Z'), { now: '2026-10-11T07:30:00.000Z' }); // next Pacific day
+    expect(r.status).toBe('ok');
+    expect(yt.videos(tracked(store)!.playlistId!)).toEqual(['a', 'b']);
   });
 });
