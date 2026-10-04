@@ -159,7 +159,7 @@ async function main(argv: string[]): Promise<number> {
         try {
           const result = await discover({
             adapter, store, eventsTransport: transport, youtube: new YouTubeClient(transport, apiKey), sources: loadSources(root),
-            prefs: loadPreferences(root), window, cohort, kind, runId: `${now().slice(0, 19).replace(/[:T]/g, '')}-${randomUUID().slice(0, 8)}`, now,
+            prefs: loadPreferences(root), window, cohort, kind, maxScanPages: kind === 'backfill' ? 60 : 20, runId: `${now().slice(0, 19).replace(/[:T]/g, '')}-${randomUUID().slice(0, 8)}`, now,
           });
           printDiscover(result, cohort);
           return result.status === 'failed' ? 2 : result.status === 'incomplete' ? 3 : 0;

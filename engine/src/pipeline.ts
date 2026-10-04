@@ -22,6 +22,8 @@ export interface DiscoverOptions {
   kind: RunKind;
   runId: string;
   now: () => string;
+  /** Uploads-scan page limit; backfills reaching weeks back on busy channels need more than the hourly default. */
+  maxScanPages?: number;
 }
 
 export interface EventOutcome {
@@ -105,7 +107,7 @@ export async function discover(o: DiscoverOptions): Promise<DiscoverResult> {
     let scan: UploadScan;
     try {
       if (quotaExhausted) throw new QuotaExceededError('YouTube quota exceeded earlier in this run');
-      scan = await youtube.scanUploads(await youtube.uploadsPlaylistId(source.channelId), since);
+      scan = await youtube.scanUploads(await youtube.uploadsPlaylistId(source.channelId), since, o.maxScanPages);
     } catch (err) {
       quotaExhausted ||= err instanceof QuotaExceededError;
       scan = { playlistId: '?', items: [], pages: 0, complete: false, stopReason: 'error', error: (err as Error).message };

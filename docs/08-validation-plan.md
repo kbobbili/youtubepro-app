@@ -82,6 +82,18 @@ Sequencing (user decision 2026-10-03): F1, soccer, tennis and cricket are built 
 
 **Publish budget:** a safety rail at 8,000 of the project's default 10,000 daily units, reserving headroom for discovery, rather than a throttle.
 
+**Sport status (2026-10-03, live backfills audited match by match):**
+
+| Sport | Source(s) | Backfill result | Notes |
+| --- | --- | --- | --- |
+| NFL | NFL | 22/22 followed and diagnostic games correct (Weeks 1–4) | Weeks 1–2 title variants added after the audit caught two misses |
+| F1 (race) | FORMULA 1 | 3/3 | — |
+| Soccer | NBC Sports (EPL), ESPN FC (LaLiga) | 7/7 sourced; 3 unavailable by design | No US Champions League source; one "LATE DRAMA" title screened out |
+| Tennis (ATP, Top 30) | ATP Tour | 35 found, 1 never uploaded, 9 pending | Not published: winner-first name order (open decision) |
+| Cricket (ODI/T20I) | Willow (per series) | 10/10 covered; 10 uncovered series; 4 never uploaded | Tests deferred; add series as Willow covers them |
+
+**Design deviations from the engine plan (2026-10-03):** each sport runs its own discovery (one uploads scan per source per sport) instead of a single combined channel scan, matching per-sport failure isolation; spoiler terms live in one per-sport table in `spoilers.ts` rather than behind the adapter interface; backfills may scan up to 60 uploads pages (hourly runs keep 20).
+
 **Device log:** _no observations yet._
 
 ## Exit criteria

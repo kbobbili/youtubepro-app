@@ -9,11 +9,14 @@ import { resolveNflTeam } from './teams.ts';
  *   "Arizona Cardinals vs. San Francisco 49ers Game Highlights | NFL 2026 Season Week 3"
  *   "Los Angeles Rams vs Denver Broncos Game Highlights | 2026 NFL Season Week 3"
  *   "Baltimore Ravens vs Dallas Cowboys Game Highlights from Rio | 2026 NFL Season Week 3"
+ * Weeks 1–2 (observed 2026-10-03) also used:
+ *   "Miami Dolphins vs. San Francisco 49ers Game Highlights | NFL 2026 Week 2"            (no "Season")
+ *   "San Francisco 49ers vs Los Angeles Rams Game Highlights | 2026 Week 1 Melbourne Game" (trailing venue)
  * Order is away vs home. Postseason/preseason naming is not yet observed and is not parsed.
  */
 
 const TITLE =
-  /^(?<a>.+?)\s+(?:vs\.?|v\.?|at|@)\s+(?<b>.+?)\s+Game Highlights(?:\s+from\s+[^|]+?)?\s*\|\s*(?:(?<y1>\d{4})\s+NFL\s+Season|NFL\s+(?<y2>\d{4})\s+Season)\s+Week\s+(?<week>\d{1,2})\s*$/i;
+  /^(?<a>.+?)\s+(?:vs\.?|v\.?|at|@)\s+(?<b>.+?)\s+Game Highlights(?:\s+from\s+[^|]+?)?\s*\|\s*(?:NFL\s+)?(?<y>\d{4})\s+(?:NFL\s+)?(?:Season\s+)?Week\s+(?<week>\d{1,2})\b[^|]*$/i;
 
 const REJECT_TERMS = /\b(press conference|presser|preview|prediction|predictions|interview|reaction|mic'?d up|every play|all-22|film breakdown|fantasy)\b/i;
 
@@ -47,7 +50,7 @@ export function parseNflHighlightTitle(title: string): TitleParse {
   if (first === second) return { ok: false, reason: 'same_team' };
   return {
     ok: true,
-    value: { first, second, season: Number(m.groups.y1 ?? m.groups.y2), week: Number(m.groups.week) },
+    value: { first, second, season: Number(m.groups.y), week: Number(m.groups.week) },
   };
 }
 

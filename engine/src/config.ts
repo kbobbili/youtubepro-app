@@ -137,7 +137,7 @@ const CollectionBase = {
 };
 
 export const Collection = z.discriminatedUnion('kind', [
-  z.object({ ...CollectionBase, kind: z.literal('mixed'), perSportCaps: z.record(z.string(), z.number().int().min(1)).default({}) }),
+  z.object({ ...CollectionBase, kind: z.literal('mixed'), perSportCaps: z.record(z.string(), z.number().int().min(0)).default({}) }),
   z.object({ ...CollectionBase, kind: z.literal('sport'), sport: z.string().min(1) }),
   z.object({ ...CollectionBase, kind: z.literal('team'), sport: z.string().min(1), team: z.string().min(1) }),
 ]);

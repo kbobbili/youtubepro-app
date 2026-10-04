@@ -21,6 +21,9 @@ const REAL_GAME_TITLES: [string, string, string, number][] = [
   ['New York Jets vs. Detroit Lions Game Highlights | NFL 2026 Season Week 3', 'NYJ', 'DET', 3],
   ['Tennessee Titans vs. New York Giants Game Highlights | NFL 2026 Season Week 3', 'TEN', 'NYG', 3],
   ['Atlanta Falcons vs Green Bay Packers Game Highlights | 2026 NFL Season Week 3', 'ATL', 'GB', 3],
+  // Weeks 1–2 formats (observed 2026-10-03).
+  ['Miami Dolphins vs. San Francisco 49ers Game Highlights | NFL 2026 Week 2', 'MIA', 'SF', 2],
+  ['San Francisco 49ers vs Los Angeles Rams Game Highlights | 2026 Week 1 Melbourne Game', 'SF', 'LAR', 1],
 ];
 
 const event = (over: Partial<NflEvent> = {}): NflEvent => ({

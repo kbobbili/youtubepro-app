@@ -21,7 +21,7 @@ collections:
     sport: nfl
     windowDays: 30
     cap: 50
-    publish: true                 # the first and only published collection until the Onn gate passes
+    publish: true
 
   - id: f1
     title: "SportsCenter · F1"
@@ -29,7 +29,7 @@ collections:
     sport: f1
     windowDays: 30
     cap: 30
-    publish: false
+    publish: true
 
   - id: soccer
     title: "SportsCenter · Soccer"
@@ -37,7 +37,7 @@ collections:
     sport: soccer
     windowDays: 30
     cap: 30
-    publish: false
+    publish: true
 
   - id: tennis
     title: "SportsCenter · Tennis"
@@ -45,7 +45,7 @@ collections:
     sport: tennis
     windowDays: 30
     cap: 30
-    publish: false
+    publish: false                # name order in ATP titles leaks winners (61%); pending user decision (docs/10-sport-integrations/tennis.md)
 
   - id: cricket
     title: "SportsCenter · Cricket"
@@ -53,15 +53,15 @@ collections:
     sport: cricket
     windowDays: 30
     cap: 30
-    publish: false
+    publish: true
 
   - id: this-week
     title: "SportsCenter · This Week"
     kind: mixed
     windowDays: 7
     cap: 40
-    perSportCaps: { tennis: 10 }
-    publish: false
+    perSportCaps: { tennis: 0 }   # 0 keeps tennis out until the name-order decision; 10 was the planned cap
+    publish: true
 
   - id: bills
     title: "SportsCenter · Bills"
@@ -70,7 +70,7 @@ collections:
     team: BUF
     windowDays: 30
     cap: 30
-    publish: false
+    publish: true
 
   - id: 49ers
     title: "SportsCenter · 49ers"
@@ -79,7 +79,7 @@ collections:
     team: SF
     windowDays: 30
     cap: 30
-    publish: false
+    publish: true
 
   - id: arsenal
     title: "SportsCenter · Arsenal"
@@ -88,7 +88,7 @@ collections:
     team: "359"
     windowDays: 30
     cap: 30
-    publish: false
+    publish: true
 
   - id: real-madrid
     title: "SportsCenter · Real Madrid"
@@ -97,7 +97,7 @@ collections:
     team: "86"
     windowDays: 30
     cap: 30
-    publish: false
+    publish: true
 
   - id: india
     title: "SportsCenter · India"
@@ -106,4 +106,4 @@ collections:
     team: "6"
     windowDays: 30
     cap: 30
-    publish: false
+    publish: true
