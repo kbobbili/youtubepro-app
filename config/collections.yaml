@@ -12,55 +12,16 @@ publishing:
   includeFlaggedTitles: false     # explicit overrides only; any override is shown in the dry run
   includeUnreviewedTitles: false
 
-# Every sport now has an adapter (NFL, F1, soccer, tennis, cricket). `publish` turns on each playlist; the first
-# publish covers all enabled collections at once (user decision 2026-10-03), followed by the Onn device gate.
+# Playlist rules (user decisions 2026-10-03). Every playlist is ordered newest YouTube upload first.
+# `keep` decides membership; only watchable highlights count, so an event without a trusted source never takes
+# a slot. Leaving a playlist never deletes stored history. The NFL and Soccer playlists were dropped: the team
+# playlists cover the same games.
 collections:
-  - id: nfl
-    title: "SportsCenter · NFL"
-    kind: sport
-    sport: nfl
-    windowDays: 30
-    cap: 50
-    publish: true
-
-  - id: f1
-    title: "SportsCenter · F1"
-    kind: sport
-    sport: f1
-    windowDays: 30
-    cap: 30
-    publish: true
-
-  - id: soccer
-    title: "SportsCenter · Soccer"
-    kind: sport
-    sport: soccer
-    windowDays: 30
-    cap: 30
-    publish: true
-
-  - id: tennis
-    title: "SportsCenter · Tennis"
-    kind: sport
-    sport: tennis
-    windowDays: 30
-    cap: 30
-    publish: true                 # name-order hint in ATP titles accepted by the user (2026-10-03)
-
-  - id: cricket
-    title: "SportsCenter · Cricket"
-    kind: sport
-    sport: cricket
-    windowDays: 30
-    cap: 30
-    publish: true
-
   - id: this-week
     title: "SportsCenter · This Week"
     kind: mixed
-    windowDays: 7
-    cap: 40
-    perSportCaps: { tennis: 10 }
+    keep: { days: 7 }               # everything from the last 7 days, no count limit
+    excludeSports: [tennis]         # tennis has its own playlist
     publish: true
 
   - id: bills
@@ -68,8 +29,7 @@ collections:
     kind: team
     sport: nfl
     team: BUF
-    windowDays: 30
-    cap: 30
+    keep: { last: 7 }
     publish: true
 
   - id: 49ers
@@ -77,8 +37,7 @@ collections:
     kind: team
     sport: nfl
     team: SF
-    windowDays: 30
-    cap: 30
+    keep: { last: 7 }
     publish: true
 
   - id: arsenal
@@ -86,8 +45,7 @@ collections:
     kind: team
     sport: soccer
     team: "359"
-    windowDays: 30
-    cap: 30
+    keep: { last: 7 }               # across every competition with a trusted US source
     publish: true
 
   - id: real-madrid
@@ -95,8 +53,21 @@ collections:
     kind: team
     sport: soccer
     team: "86"
-    windowDays: 30
-    cap: 30
+    keep: { last: 7 }
+    publish: true
+
+  - id: f1
+    title: "SportsCenter · F1"
+    kind: sport
+    sport: f1
+    keep: { last: 7 }               # race highlights
+    publish: true
+
+  - id: cricket
+    title: "SportsCenter · Cricket"
+    kind: sport
+    sport: cricket
+    keep: { last: 14 }              # all followed nations
     publish: true
 
   - id: india
@@ -104,6 +75,14 @@ collections:
     kind: team
     sport: cricket
     team: "6"
-    windowDays: 30
-    cap: 30
+    keep: { last: 7 }
+    publish: true
+
+  - id: tennis
+    title: "SportsCenter · Tennis"
+    kind: sport
+    sport: tennis
+    # Tournaments in progress or finished in the last 7 days; quarterfinals onward (Grand Slams: round of 16 onward).
+    # Name order in ATP titles hints at the winner; accepted by the user (2026-10-03).
+    keep: { tournaments: { finishedWithinDays: 7, fromStage: qf, majorsFromStage: r16 } }
     publish: true

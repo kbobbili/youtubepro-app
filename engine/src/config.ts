@@ -126,22 +126,51 @@ export const PRIORITY_RANK = { must: 3, high: 2, normal: 1, low: 0 } as const;
 
 // ---- Collections (playlist-delivery experiment) ----------------------------
 
+/** Stage reached, by players left: r16 = round of 16, qf = quarterfinals, sf = semifinals, f = final. */
+export const Stage = z.enum(['r16', 'qf', 'sf', 'f']);
+export const STAGE_PLAYERS = { r16: 16, qf: 8, sf: 4, f: 2 } as const;
+
+/**
+ * Which watchable highlights a collection keeps (user decisions 2026-10-03). Only items that pass every
+ * eligibility check count, so a match without a trusted source never takes a slot. Leaving a collection never
+ * deletes stored history.
+ */
+export const Keep = z.union([
+  /** The N most recent events by start time. */
+  z.object({ last: z.number().int().min(1).max(200) }).strict(),
+  /** Every event that started in the last D days (no count limit). */
+  z.object({ days: z.number().int().min(1).max(366) }).strict(),
+  /** Tournament-shaped sports: tournaments in progress or finished within D days, from a stage onward. */
+  z
+    .object({
+      tournaments: z.object({ finishedWithinDays: z.number().int().min(1).max(60), fromStage: Stage, majorsFromStage: Stage }).strict(),
+    })
+    .strict(),
+]);
+export type Keep = z.infer<typeof Keep>;
+
 const CollectionBase = {
   id: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
   title: z.string().min(1).max(150),
-  /** Rolling window on event start time. Aging out removes an item from this collection only. */
-  windowDays: z.number().int().min(1).max(366),
-  cap: z.number().int().min(1).max(200),
+  keep: Keep,
   /** Publish to a YouTube playlist. Collections are still computed when false. */
   publish: z.boolean(),
 };
 
 export const Collection = z.discriminatedUnion('kind', [
-  z.object({ ...CollectionBase, kind: z.literal('mixed'), perSportCaps: z.record(z.string(), z.number().int().min(0)).default({}) }),
+  z.object({ ...CollectionBase, kind: z.literal('mixed'), excludeSports: z.array(z.string()).default([]) }),
   z.object({ ...CollectionBase, kind: z.literal('sport'), sport: z.string().min(1) }),
   z.object({ ...CollectionBase, kind: z.literal('team'), sport: z.string().min(1), team: z.string().min(1) }),
 ]);
 export type Collection = z.infer<typeof Collection>;
+
+/** Human-readable selection rule, shown in the catalog and dry runs. */
+export function describeKeep(k: Keep): string {
+  if ('last' in k) return `last ${k.last} events`;
+  if ('days' in k) return `all events from the last ${k.days} days`;
+  const t = k.tournaments;
+  return `tournaments active or finished within ${t.finishedWithinDays} days; from ${t.fromStage.toUpperCase()} (majors from ${t.majorsFromStage.toUpperCase()})`;
+}
 
 export const PublishingConfig = z.object({
   /** Publisher budget per Pacific-time quota day; reads and attempted writes both count. */

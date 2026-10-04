@@ -18,7 +18,7 @@ function simulate(fail: string[]): { code: number | null; steps: string[]; log: 
   return { code: res.status, steps: [...log.matchAll(/:: \[([\w-]+)\]/g)].map((m) => m[1]!), log };
 }
 
-const ALL = ['discover-nfl', 'discover-f1', 'discover-soccer', 'discover-tennis', 'discover-cricket', 'snapshot', 'catalog', 'diagnostic'];
+const ALL = ['discover-nfl', 'discover-f1', 'discover-soccer', 'discover-tennis', 'discover-cricket', 'snapshot', 'catalog', 'publish', 'diagnostic'];
 
 describe.skipIf(process.platform !== 'win32')('hourly chain (per-collection failure isolation)', () => {
   it('runs every step and exits 0 when all succeed', () => {
@@ -35,11 +35,11 @@ describe.skipIf(process.platform !== 'win32')('hourly chain (per-collection fail
     expect(r.log).toMatch(/CHAIN DONE WITH FAILURES: discover-nfl=3/);
   });
 
-  it('a catalog that fails to build is a gate: later personal steps (publishing) never run', () => {
+  it('a catalog that fails to build is a gate: publishing never runs', () => {
     const r = simulate(['catalog']);
     expect(r.code).toBe(3);
-    expect(r.steps).toEqual(ALL); // nothing after catalog yet besides the diagnostic, which always runs
-    expect(r.log).toMatch(/GATE FAILED: \[catalog\] exit=3/);
+    expect(r.steps).toEqual(ALL.filter((s) => s !== 'publish'));
+    expect(r.log).toMatch(/GATE FAILED: \[catalog\] exit=3; skipped: publish/);
   });
 
   it('a diagnostic-only failure never affects the exit code', () => {

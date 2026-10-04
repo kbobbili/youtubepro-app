@@ -1,7 +1,7 @@
 import { CatalogSnapshot } from '@sportscenter/contracts';
 import { describe, expect, it } from 'vitest';
 import { buildCatalog, generateCatalog, type CatalogOptions } from '../src/catalog.ts';
-import { loadCollections, loadSources, repoRoot, type CollectionsConfig, type Preferences } from '../src/config.ts';
+import { loadCollections, loadSources, repoRoot, type Collection, type CollectionsConfig, type Preferences } from '../src/config.ts';
 import { nflAdapter } from '../src/adapters/nfl/index.ts';
 import type { NflEvent } from '../src/domain.ts';
 import { discover } from '../src/pipeline.ts';
@@ -35,7 +35,7 @@ function meta(id: string, title: string, over: Partial<VideoMetadata['status']> 
 
 let seq = 0;
 /** Seed one completed NFL event with a FOUND primary highlight and a metadata check at `checkedAt`. */
-function seed(store: Store, o: { start: string; home: string; away: string; title?: string; checkedAt?: string; status?: Partial<VideoMetadata['status']> }): { eventId: string; videoId: string } {
+function seed(store: Store, o: { start: string; home: string; away: string; title?: string; checkedAt?: string; publishedAt?: string; status?: Partial<VideoMetadata['status']> }): { eventId: string; videoId: string } {
   const n = ++seq;
   const eventId = `nfl:espn:${n}`;
   const videoId = `vid${n}`;
@@ -47,7 +47,7 @@ function seed(store: Store, o: { start: string; home: string; away: string; titl
   store.upsertEvent(event, o.start, false);
   store.setDiscovery(eventId, 'FOUND', o.start);
   store.upsertCandidate(
-    { eventId, videoId, sourceId: 'nfl-youtube', channelId: NFL_CHANNEL, rawTitle: o.title ?? `${o.away} vs ${o.home} Game Highlights`, publishedAt: o.start, durationSeconds: 900, confidence: 1, flags: [], metadataEligible: true, metadataReasons: [] },
+    { eventId, videoId, sourceId: 'nfl-youtube', channelId: NFL_CHANNEL, rawTitle: o.title ?? `${o.away} vs ${o.home} Game Highlights`, publishedAt: o.publishedAt ?? o.start, durationSeconds: 900, confidence: 1, flags: [], metadataEligible: true, metadataReasons: [] },
     o.start,
   );
   store.selectPrimary(eventId, o.start);
@@ -61,9 +61,15 @@ function okRun(store: Store, status: 'ok' | 'incomplete' = 'ok') {
   store.finishRun(id, NOW, status, [], {});
 }
 
-// NFL-only preferences here, so only the NFL and mixed collections are in scope (other sports would report "not enabled").
+// Test collections exercising each keep rule (NFL-only preferences here).
 const loaded = loadCollections(root);
-const baseConfig = { ...loaded, collections: loaded.collections.filter((c) => c.kind === 'mixed' || c.sport === 'nfl') };
+const COLLECTIONS: Collection[] = [
+  { id: 'this-week', title: 'This Week', kind: 'mixed', keep: { days: 7 }, excludeSports: ['tennis'], publish: true },
+  { id: 'nfl', title: 'NFL', kind: 'sport', sport: 'nfl', keep: { last: 50 }, publish: true },
+  { id: 'bills', title: 'Bills', kind: 'team', sport: 'nfl', team: 'BUF', keep: { last: 7 }, publish: true },
+  { id: '49ers', title: '49ers', kind: 'team', sport: 'nfl', team: 'SF', keep: { last: 7 }, publish: true },
+];
+const baseConfig: CollectionsConfig = { publishing: loaded.publishing, collections: COLLECTIONS };
 function options(over: { prefs?: Preferences; collections?: Partial<CollectionsConfig>; publishing?: Partial<CollectionsConfig['publishing']>; sources?: typeof sources } = {}): CatalogOptions {
   return {
     prefs: over.prefs ?? prefs,
@@ -73,61 +79,67 @@ function options(over: { prefs?: Preferences; collections?: Partial<CollectionsC
     configRevision: 'test',
   };
 }
+const withKeep = (id: string, keep: Collection['keep']) => ({ collections: COLLECTIONS.map((x) => (x.id === id ? { ...x, keep } : x)) });
 
 const col = (c: CatalogSnapshot, id: string) => c.collections.find((x) => x.id === id)!;
 const vids = (c: CatalogSnapshot, id: string) => col(c, id).items.map((i) => i.video.videoId);
 
 describe('catalog', () => {
-  it('orders every collection by event start (oldest first) and applies sport/team membership', () => {
+  it('orders every collection newest upload first and applies sport/team membership', () => {
     const store = new Store(':memory:');
     okRun(store);
     const b = seed(store, { start: daysAgo(2), home: 'BUF', away: 'LAC' });
     const s = seed(store, { start: daysAgo(3), home: 'SF', away: 'ARI' });
     seed(store, { start: daysAgo(1), home: 'KC', away: 'MIA' }); // not followed
     const c = buildCatalog(store, options());
-    expect(vids(c, 'nfl')).toEqual([s.videoId, b.videoId]);
-    expect(vids(c, 'this-week')).toEqual([s.videoId, b.videoId]);
+    expect(vids(c, 'nfl')).toEqual([b.videoId, s.videoId]);
+    expect(vids(c, 'this-week')).toEqual([b.videoId, s.videoId]);
     expect(vids(c, 'bills')).toEqual([b.videoId]);
     expect(vids(c, '49ers')).toEqual([s.videoId]);
     expect(c.collections.every((x) => x.status === 'complete')).toBe(true);
-    expect(col(c, 'nfl').items[0]).toMatchObject({ neutralTitle: 'ARI Team at SF Team', subtitle: 'NFL · Week 3', titleScreen: 'unflagged' });
+    expect(col(c, '49ers').items[0]).toMatchObject({ neutralTitle: 'ARI Team at SF Team', subtitle: 'NFL · Week 3', titleScreen: 'unflagged' });
+    expect(col(c, 'bills').rule).toBe('last 7 events');
   });
 
-  it('rolling retention: >7 days leaves this-week but stays in 30-day lists; >30 days leaves all', () => {
+  it('a late upload of an older game sits above newer games (upload time decides order)', () => {
     const store = new Store(':memory:');
     okRun(store);
-    const recent = seed(store, { start: daysAgo(2), home: 'BUF', away: 'LAC' });
-    const older = seed(store, { start: daysAgo(8), home: 'BUF', away: 'NYJ' });
-    seed(store, { start: daysAgo(31), home: 'BUF', away: 'MIA' });
+    const older = seed(store, { start: daysAgo(4), home: 'BUF', away: 'LAC', publishedAt: daysAgo(0, 2) }); // posted days late
+    const newer = seed(store, { start: daysAgo(2), home: 'BUF', away: 'NYJ' });
+    expect(vids(buildCatalog(store, options()), 'bills')).toEqual([older.videoId, newer.videoId]);
+  });
+
+  it('last N keeps the N most recent watchable games; older ones roll off but stay stored', () => {
+    const store = new Store(':memory:');
+    okRun(store);
+    const games = [40, 30, 20, 10, 3].map((d) => seed(store, { start: daysAgo(d), home: 'BUF', away: 'LAC' }));
+    const c = buildCatalog(store, options({ collections: withKeep('bills', { last: 3 }) }));
+    expect(vids(c, 'bills')).toEqual([games[4]!, games[3]!, games[2]!].map((g) => g.videoId));
+    expect(col(c, 'bills').window.start).toBe(daysAgo(20));
+    expect(store.db.prepare('SELECT COUNT(*) AS n FROM highlights').get()).toEqual({ n: 5 });
+  });
+
+  it('an unwatchable game never takes a slot in a last-N list', () => {
+    const store = new Store(':memory:');
+    okRun(store);
+    const a = seed(store, { start: daysAgo(9), home: 'BUF', away: 'LAC' });
+    const b = seed(store, { start: daysAgo(5), home: 'BUF', away: 'NYJ' });
+    const flagged = seed(store, { start: daysAgo(2), home: 'BUF', away: 'MIA', title: 'Bills beat Dolphins 31-10' });
+    const c = buildCatalog(store, options({ collections: withKeep('bills', { last: 2 }) }));
+    expect(vids(c, 'bills')).toEqual([b.videoId, a.videoId]);
+    expect(col(c, 'bills').exclusions).toEqual([expect.objectContaining({ eventId: flagged.eventId, reason: expect.stringMatching(/^title_flagged:/) })]);
+  });
+
+  it('a days rule keeps everything in the window with no count limit, minus excluded sports', () => {
+    const store = new Store(':memory:');
+    okRun(store);
+    const inWeek = [1, 2, 3, 4, 5, 6].map((d) => seed(store, { start: daysAgo(d), home: d % 2 ? 'BUF' : 'SF', away: 'LAC' }));
+    seed(store, { start: daysAgo(8), home: 'BUF', away: 'NYJ' });
     const c = buildCatalog(store, options());
-    expect(vids(c, 'this-week')).toEqual([recent.videoId]);
-    expect(vids(c, 'nfl')).toEqual([older.videoId, recent.videoId]);
-    expect(vids(c, 'bills')).toEqual([older.videoId, recent.videoId]);
-    expect(col(c, 'nfl').window.start).toBe(daysAgo(30));
-    expect(col(c, 'nfl').coverage.storedHistoryFrom).toBe(daysAgo(31));
-    // Records stay stored; aging out only removes collection membership.
-    expect(store.db.prepare('SELECT COUNT(*) AS n FROM highlights').get()).toEqual({ n: 3 });
-  });
-
-  it('selects capped membership first (newest), then displays oldest first', () => {
-    const store = new Store(':memory:');
-    okRun(store);
-    const [a, b, d] = [4, 3, 2].map((n) => seed(store, { start: daysAgo(n), home: 'BUF', away: 'LAC' }));
-    const c = buildCatalog(store, options({ collections: { collections: baseConfig.collections.map((x) => (x.id === 'nfl' ? { ...x, cap: 2 } : x)) } }));
-    expect(vids(c, 'nfl')).toEqual([b!.videoId, d!.videoId]);
-    expect(col(c, 'nfl').exclusions).toContainEqual({ eventId: a!.eventId, videoId: a!.videoId, reason: 'over_cap' });
-  });
-
-  it('mixed collections rank by priority before recency, under total and per-sport caps', () => {
-    const store = new Store(':memory:');
-    okRun(store);
-    const bills = seed(store, { start: daysAgo(5), home: 'BUF', away: 'LAC' });
-    seed(store, { start: daysAgo(1), home: 'SF', away: 'ARI' });
-    const p: Preferences = { ...prefs, sports: { nfl: { enabled: true, teams: [{ abbr: 'SF', name: 'SF', priority: 'low' }, { abbr: 'BUF', name: 'BUF', priority: 'must' }] } } };
-    const cfg = baseConfig.collections.map((x) => (x.id === 'this-week' ? { ...x, cap: 1 } : x));
-    expect(vids(buildCatalog(store, options({ prefs: p, collections: { collections: cfg } })), 'this-week')).toEqual([bills.videoId]);
-    const perSport = baseConfig.collections.map((x) => (x.kind === 'mixed' ? { ...x, perSportCaps: { nfl: 1 } } : x));
-    expect(vids(buildCatalog(store, options({ prefs: p, collections: { collections: perSport } })), 'this-week')).toEqual([bills.videoId]);
+    expect(vids(c, 'this-week')).toEqual(inWeek.map((g) => g.videoId));
+    expect(col(c, 'this-week').window.start).toBe(daysAgo(7));
+    const noNfl = buildCatalog(store, options({ collections: { collections: [{ ...COLLECTIONS[0]!, excludeSports: ['nfl'] } as Collection] } }));
+    expect(vids(noNfl, 'this-week')).toEqual([]);
   });
 
   it('excludes flagged titles by default; an explicit override includes them and is recorded', () => {
@@ -209,7 +221,7 @@ describe('catalog', () => {
       cohort: 'personal', kind: 'backfill', runId: 'w3-embed', now: () => '2026-10-03T02:30:00.000Z',
     });
     expect(r.outcomes.map((o) => o.discovery)).toEqual(['FOUND', 'FOUND']);
-    expect(vids(buildCatalog(store, { ...options(), now: '2026-10-03T02:30:00.000Z' }), 'nfl')).toEqual(['v__pg6qIYL4', '7ngu-tT0PQs']);
+    expect(vids(buildCatalog(store, { ...options(), now: '2026-10-03T02:30:00.000Z' }), 'nfl')).toEqual(['7ngu-tT0PQs', 'v__pg6qIYL4']); // newest upload first
     expect(buildSnapshot(store, prefs, sources, '2026-10-03T02:30:00.000Z').items.map((i) => i.video.videoId)).toEqual(['7ngu-tT0PQs']);
   });
 
@@ -239,7 +251,7 @@ describe('catalog', () => {
     });
     expect(store.titleScreen('v__pg6qIYL4')).toMatchObject({ status: 'unflagged' });
     const c = buildCatalog(store, { ...options(), now: '2026-10-03T02:30:00.000Z' });
-    expect(vids(c, 'nfl')).toEqual(['v__pg6qIYL4', '7ngu-tT0PQs']); // LAC@BUF 17:00Z before ARI@SF 20:05Z
+    expect(vids(c, 'nfl')).toEqual(['7ngu-tT0PQs', 'v__pg6qIYL4']); // ARI@SF uploaded 23:42Z after LAC@BUF's highlight
     expect(JSON.stringify(c)).not.toMatch(/Game Highlights|score/i);
     expect(() => CatalogSnapshot.parse(c)).not.toThrow();
   });

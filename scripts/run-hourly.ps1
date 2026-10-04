@@ -53,9 +53,10 @@ $personal = @(
   @{ name = 'discover-cricket'; args = @('discover', 'cricket', '--days', '7', '--kind', 'prospective') },
   @{ name = 'snapshot'; args = @('snapshot') },
   # Catalog revalidates retained videos (YouTube API key); incomplete collections are recorded inside it.
-  @{ name = 'catalog'; args = @('catalog'); gate = $true }
-  # sync-playlists --apply is added after the catalog only after an inspected dry run, manual apply, the Onn
-  # device gate, and a zero-change second apply (docs/08-validation-plan.md).
+  @{ name = 'catalog'; args = @('catalog'); gate = $true },
+  # Publishing (enabled 2026-10-03 after the Onn check and a zero-change re-apply). Runs only if the catalog
+  # built; incomplete collections are skipped one by one and keep their last-known-good playlists.
+  @{ name = 'publish'; args = @('sync-playlists', '--apply') }
 )
 $diagnostic = @{ name = 'diagnostic'; args = @('discover', 'nfl', '--days', '7', '--kind', 'prospective', '--all-teams') }
 

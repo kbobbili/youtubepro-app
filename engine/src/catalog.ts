@@ -3,7 +3,7 @@ import path from 'node:path';
 import { CATALOG_SCHEMA_VERSION, CatalogSnapshot, type CatalogCollection, type CatalogExclusion, type CatalogItem } from '@sportscenter/contracts';
 import { ADAPTERS } from './adapters/index.ts';
 import type { SportAdapter } from './adapters/types.ts';
-import { trustedSources, type Collection, type CollectionsConfig, type Preferences, type Source } from './config.ts';
+import { describeKeep, STAGE_PLAYERS, trustedSources, type Collection, type CollectionsConfig, type Preferences, type Source } from './config.ts';
 import type { RunStatus, SportEvent } from './domain.ts';
 import { rescreenOutdated, revalidateVideos, type RevalidationResult } from './revalidate.ts';
 import { SCREENING_VERSION } from './spoilers.ts';
@@ -46,10 +46,12 @@ function activeAdapters(prefs: Preferences): SportAdapter[] {
   return ADAPTERS.filter((a) => (prefs.sports as Record<string, { enabled?: boolean } | undefined>)[a.sport]?.enabled);
 }
 
-/** Completed events in the widest collection window, with their primary highlight (if any). */
+/** How far back "last N" selections may reach (a season and a bit). */
+const HISTORY_DAYS = 400;
+
+/** Completed events within the history horizon, with their primary highlight (if any). */
 function loadRows(store: Store, o: CatalogOptions): Row[] {
-  const maxDays = Math.max(0, ...o.collections.collections.map((c) => c.windowDays));
-  const since = new Date(Date.parse(o.now) - maxDays * DAY_MS).toISOString();
+  const since = new Date(Date.parse(o.now) - HISTORY_DAYS * DAY_MS).toISOString();
   const sports = activeAdapters(o.prefs).map((a) => a.sport);
   if (!sports.length) return [];
   return store.db
@@ -87,7 +89,8 @@ function evaluate(store: Store, f: ReturnType<typeof followedRows>[number], o: C
   if (!source) return fail('untrusted_source');
 
   const check = store.videoCheck(row.video_id);
-  const stale = staleIds.has(row.video_id);
+  // Evidence older than the maximum age is stale whether or not a refresh was attempted this run.
+  const stale = staleIds.has(row.video_id) || (!!check && Date.parse(o.now) - Date.parse(check.checkedAt) > o.collections.publishing.maxMetadataAgeHours * 3_600_000);
   if (!check) return fail('metadata_unchecked', true);
   if (!check.available) return fail('video_unavailable'); // confirmed removal, distinct from a failed refresh
   if (check.channelId !== source.channelId) return fail('channel_mismatch');
@@ -118,21 +121,53 @@ function evaluate(store: Store, f: ReturnType<typeof followedRows>[number], o: C
   };
 }
 
-const byStartAsc = (a: Candidate, b: Candidate) => a.event.startTime.localeCompare(b.event.startTime) || a.event.id.localeCompare(b.event.id);
 const byStartDesc = (a: Candidate, b: Candidate) => b.event.startTime.localeCompare(a.event.startTime) || a.event.id.localeCompare(b.event.id);
+/** Display order (user decision 2026-10-03): newest YouTube upload first. */
+const byUploadDesc = (a: Candidate, b: Candidate) => b.item!.video.publishedAt.localeCompare(a.item!.video.publishedAt) || a.event.id.localeCompare(b.event.id);
 
 function isMember(c: Candidate, col: Collection): boolean {
-  if (col.kind === 'mixed') return true;
+  if (col.kind === 'mixed') return !col.excludeSports.includes(c.event.sport);
   if (c.event.sport !== col.sport) return false;
   return col.kind === 'sport' || c.event.participants.some((p) => p.id === col.team);
 }
 
-const sportsOf = (col: Collection, active: string[]) => (col.kind === 'mixed' ? active : [col.sport]);
+const sportsOf = (col: Collection, active: string[]) => (col.kind === 'mixed' ? active.filter((s) => !col.excludeSports.includes(s)) : [col.sport]);
 
 /**
- * Selection before ordering: filter by membership, window, trust and screening; choose capped membership
- * deterministically; only then sort the selection by display order (event start, oldest first).
+ * Apply the collection's keep rule to its members. Returns the selected candidates (eligible only, so a match
+ * without a watchable highlight never takes a slot), the members the rule considered, and the time cutoff used.
  */
+function applyKeep(col: Collection, members: Candidate[], o: CatalogOptions): { selected: Candidate[]; considered: Candidate[]; cutoff?: string } {
+  const keep = col.keep;
+  const newest = [...members].sort(byStartDesc);
+  if ('days' in keep) {
+    const cutoff = new Date(Date.parse(o.now) - keep.days * DAY_MS).toISOString();
+    const considered = newest.filter((c) => c.event.startTime >= cutoff);
+    return { selected: considered.filter((c) => c.item), considered, cutoff };
+  }
+  if ('last' in keep) {
+    const selected = newest.filter((c) => c.item).slice(0, keep.last);
+    const oldest = selected.at(-1)?.event.startTime;
+    // Report gaps only among events recent enough to have been in the list.
+    const considered = selected.length === keep.last ? newest.filter((c) => c.event.startTime >= oldest!) : newest;
+    return { selected, considered };
+  }
+  // Tournaments in progress or finished within D days (by their latest followed match), from a stage onward.
+  const t = keep.tournaments;
+  const cutoff = new Date(Date.parse(o.now) - t.finishedWithinDays * DAY_MS).toISOString();
+  const adapters = new Map(ADAPTERS.map((a) => [a.sport, a]));
+  const info = new Map(members.map((c) => [c, adapters.get(c.event.sport)?.tournament?.(c.event)]));
+  const latest = new Map<string, string>();
+  for (const [c, i] of info) if (i && (latest.get(i.id) ?? '') < c.event.startTime) latest.set(i.id, c.event.startTime);
+  const considered = newest.filter((c) => {
+    const i = info.get(c);
+    if (!i || latest.get(i.id)! < cutoff || i.playersLeft === undefined) return false;
+    return i.playersLeft <= STAGE_PLAYERS[i.major ? t.majorsFromStage : t.fromStage];
+  });
+  return { selected: considered.filter((c) => c.item), considered, cutoff };
+}
+
+/** Select by the collection's keep rule, then order newest upload first. */
 function buildCollection(
   col: Collection,
   all: Candidate[],
@@ -142,43 +177,23 @@ function buildCollection(
   refreshError: string | undefined,
   historyFrom: (sports: string[]) => string | null,
 ): CatalogCollection {
-  const start = new Date(Date.parse(o.now) - col.windowDays * DAY_MS).toISOString();
-  const members = all.filter((c) => c.event.startTime >= start && isMember(c, col));
-  const exclusions: CatalogExclusion[] = members.filter((c) => !c.item).map((c) => ({ eventId: c.event.id, ...(c.videoId ? { videoId: c.videoId } : {}), reason: c.reason! }));
-  const eligible = members.filter((c) => c.item);
-
-  const selected: Candidate[] = [];
-  if (col.kind === 'mixed') {
-    const perSport = new Map<string, number>();
-    const ranked = [...eligible].sort((a, b) => b.priority - a.priority || byStartDesc(a, b));
-    for (const c of ranked) {
-      const n = perSport.get(c.event.sport) ?? 0;
-      const sportCap = col.perSportCaps[c.event.sport];
-      if (selected.length >= col.cap || (sportCap !== undefined && n >= sportCap)) {
-        exclusions.push({ eventId: c.event.id, videoId: c.item!.video.videoId, reason: 'over_cap' });
-        continue;
-      }
-      perSport.set(c.event.sport, n + 1);
-      selected.push(c);
-    }
-  } else {
-    const newest = [...eligible].sort(byStartDesc);
-    selected.push(...newest.slice(0, col.cap));
-    for (const c of newest.slice(col.cap)) exclusions.push({ eventId: c.event.id, videoId: c.item!.video.videoId, reason: 'over_cap' });
-  }
-  selected.sort(byStartAsc);
+  const members = all.filter((c) => isMember(c, col));
+  const { selected, considered, cutoff } = applyKeep(col, members, o);
+  const exclusions: CatalogExclusion[] = considered.filter((c) => !c.item).map((c) => ({ eventId: c.event.id, ...(c.videoId ? { videoId: c.videoId } : {}), reason: c.reason! }));
+  selected.sort(byUploadDesc);
 
   const sports = sportsOf(col, active);
   const issues: string[] = [];
   if (col.kind !== 'mixed' && !active.includes(col.sport)) issues.push(`sport ${col.sport} has no adapter or is not enabled in preferences`);
   for (const s of sports) issues.push(...(sportIssues.get(s) ?? []));
-  const staleCount = members.filter((c) => c.stale).length;
-  if (staleCount) issues.push(`${staleCount} member video(s) have metadata older than ${o.collections.publishing.maxMetadataAgeHours}h that could not be refreshed (${refreshError ?? 'unknown error'})`);
+  const staleCount = selected.filter((c) => c.stale).length;
+  if (staleCount) issues.push(`${staleCount} selected video(s) have metadata older than ${o.collections.publishing.maxMetadataAgeHours}h that could not be refreshed (${refreshError ?? 'not refreshed'})`);
+  const start = cutoff ?? selected.reduce((min, c) => (c.event.startTime < min ? c.event.startTime : min), new Date(o.now).toISOString());
 
   return {
-    id: col.id, title: col.title, kind: col.kind, publish: col.publish,
+    id: col.id, title: col.title, kind: col.kind, publish: col.publish, rule: describeKeep(col.keep),
     status: issues.length ? 'incomplete' : 'complete', issues,
-    window: { start, end: new Date(o.now).toISOString() },
+    window: { start: new Date(start).toISOString(), end: new Date(o.now).toISOString() },
     coverage: { storedHistoryFrom: historyFrom(sports) },
     items: selected.map((c) => c.item!),
     exclusions: exclusions.sort((a, b) => a.eventId.localeCompare(b.eventId)),
@@ -229,16 +244,30 @@ export function buildCatalog(store: Store, o: CatalogOptions, revalidation: Reva
   });
 }
 
-/** Refresh stale metadata for every video the catalog could publish, then build the catalog. */
+/**
+ * Build, refresh metadata older than the maximum age for every selected video (batched), and rebuild until the
+ * selection is stable: a confirmed removal frees a slot whose replacement may need its own refresh.
+ */
 export async function generateCatalog(store: Store, youtube: YouTubeClient | undefined, o: CatalogOptions): Promise<{ catalog: CatalogSnapshot; revalidation: RevalidationResult }> {
   const rows = followedRows(store, o).filter((f) => f.row.video_id);
   const sportOf = new Map(rows.map((f) => [f.row.video_id!, f.row.sport]));
   const sportFor = (id: string) => sportOf.get(id) ?? 'unknown';
-  const revalidation = await revalidateVideos(store, youtube, [...sportOf.keys()], {
-    region: o.prefs.region, sportOf: sportFor, now: o.now, maxAgeMs: o.collections.publishing.maxMetadataAgeHours * 3_600_000,
-  });
+  // Rules changes re-screen locally (no API call) so they never hide items while waiting for a refresh.
   store.tx(() => rescreenOutdated(store, [...sportOf.keys()], sportFor, o.now));
-  return { catalog: buildCatalog(store, o, revalidation), revalidation };
+  const total: RevalidationResult = { refreshed: [], stale: [] };
+  let catalog = buildCatalog(store, o, total);
+  for (let pass = 0; pass < 3; pass++) {
+    const selected = [...new Set(catalog.collections.flatMap((c) => c.items.map((i) => i.video.videoId)))];
+    const r = await revalidateVideos(store, youtube, selected, {
+      region: o.prefs.region, sportOf: sportFor, now: o.now, maxAgeMs: o.collections.publishing.maxMetadataAgeHours * 3_600_000,
+    });
+    total.refreshed.push(...r.refreshed);
+    total.stale = r.stale;
+    if (r.error) total.error = r.error;
+    catalog = buildCatalog(store, o, total);
+    if (!r.refreshed.length) break;
+  }
+  return { catalog, revalidation: total };
 }
 
 /** Validate, then atomically replace the catalog file. */

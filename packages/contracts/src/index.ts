@@ -62,7 +62,8 @@ export type LibrarySnapshot = z.infer<typeof LibrarySnapshot>;
  * Delivering a collection to a player that shows publisher titles (e.g. a YouTube playlist) is gated by
  * each item's title screen, which is a heuristic, not proof of spoiler safety.
  */
-export const CATALOG_SCHEMA_VERSION = 1;
+/** v2 (2026-10-03): items are ordered newest upload first and each collection states its selection rule. */
+export const CATALOG_SCHEMA_VERSION = 2;
 
 export const TitleScreenStatus = z.enum(['flagged', 'unflagged', 'unreviewed']);
 
@@ -93,16 +94,19 @@ export const CatalogCollection = z
     title: z.string().min(1),
     kind: z.enum(['mixed', 'sport', 'team']),
     publish: z.boolean(),
+    /** Selection rule in plain words, e.g. "last 7 events". */
+    rule: z.string().min(1),
     /**
      * complete: inputs were complete and fresh, so the items are the full desired list (possibly empty).
      * incomplete: inputs were missing or stale; consumers must keep their last-known-good copy.
      */
     status: z.enum(['complete', 'incomplete']),
     issues: z.array(z.string()),
+    /** Event start times the selection spans (start = oldest selected event, or the rule's cutoff). */
     window: z.object({ start: z.iso.datetime(), end: z.iso.datetime() }).strict(),
     /** Stored history starts here; the catalog does not claim a backfill before it. */
     coverage: z.object({ storedHistoryFrom: z.iso.datetime().nullable() }).strict(),
-    /** Ordered by event start time (oldest first), ties by event ID. */
+    /** Ordered by YouTube publish time, newest first (ties by event ID). */
     items: z.array(CatalogItem),
     exclusions: z.array(CatalogExclusion),
   })

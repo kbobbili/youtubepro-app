@@ -1,11 +1,12 @@
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { normalizeRound, parseTennisTitle, tennisAdapter } from '../src/adapters/tennis/index.ts';
-import { loadSources, repoRoot, type Preferences } from '../src/config.ts';
+import { buildCatalog } from '../src/catalog.ts';
+import { loadCollections, loadSources, repoRoot, type Collection, type Preferences } from '../src/config.ts';
 import type { SportEvent } from '../src/domain.ts';
 import type { Transport } from '../src/http.ts';
 import { discover } from '../src/pipeline.ts';
-import { screenTitle } from '../src/spoilers.ts';
+import { SCREENING_VERSION, screenTitle, titleFingerprint } from '../src/spoilers.ts';
 import { Store } from '../src/store.ts';
 import { YouTubeClient } from '../src/youtube/client.ts';
 import { FIXTURES, fixtureTransport, overriding } from './helpers.ts';
@@ -126,5 +127,43 @@ describe('tennis discovery (recorded Sep 26–Oct 3 fixtures)', () => {
     expect(ok.notes[0]).toMatch(/using cached snapshot/);
     const later = await run(store, down, '2026-10-20T02:00:00.000Z');
     expect(later.status).toBe('incomplete');
+  });
+});
+
+describe('tennis playlist rule: current tournaments, later rounds', () => {
+  const NOW = '2026-10-10T12:00:00.000Z';
+  const ago = (d: number) => new Date(Date.parse(NOW) - d * 86_400_000).toISOString();
+  let n = 0;
+  function seed(store: Store, o: { tournament: string; major?: boolean; stage: string; start: string }) {
+    const id = `tennis:espn:${++n}`;
+    const videoId = `t${n}`;
+    store.upsertEvent(
+      m({ id, providerEventId: String(n), startTime: o.start, stage: o.stage, competition: `ATP ${o.tournament}` }, { tournamentId: o.tournament, city: o.tournament, major: !!o.major }),
+      o.start, false,
+    );
+    store.setDiscovery(id, 'FOUND', o.start);
+    store.upsertCandidate({ eventId: id, videoId, sourceId: 'atptour-youtube', channelId: 'UCY_5h5zaSwN7Or4kIJDYNXA', rawTitle: 'A vs B Highlights | X 2026 QF', publishedAt: o.start, durationSeconds: 140, confidence: 1, flags: [], metadataEligible: true, metadataReasons: [] }, o.start);
+    store.selectPrimary(id, o.start);
+    store.recordVideoCheck({ videoId, checkedAt: NOW, available: true, channelId: 'UCY_5h5zaSwN7Or4kIJDYNXA', title: 'A vs B Highlights | X 2026 QF', titleFingerprint: titleFingerprint('A vs B Highlights | X 2026 QF'), screenReasons: [] });
+    store.recordTitleScreen({ videoId, titleFingerprint: titleFingerprint('A vs B Highlights | X 2026 QF'), version: SCREENING_VERSION, status: 'unflagged', reasons: [], at: NOW });
+    return videoId;
+  }
+
+  it('keeps QF onward of tournaments active in the last 7 days, and R16 onward at Grand Slams', () => {
+    const store = new Store(':memory:');
+    store.startRun({ id: 'r', sport: 'tennis', cohort: 'personal', kind: 'prospective', startedAt: NOW, window: { start: ago(7), end: NOW }, config: {} });
+    store.finishRun('r', NOW, 'ok', [], {});
+    const recentR2 = seed(store, { tournament: 'Tokyo', stage: 'Round 2', start: ago(6) });
+    const recentQf = seed(store, { tournament: 'Tokyo', stage: 'Quarterfinal', start: ago(5) });
+    const recentF = seed(store, { tournament: 'Tokyo', stage: 'Final', start: ago(3) });
+    seed(store, { tournament: 'Chengdu', stage: 'Final', start: ago(10) }); // finished 10 days ago
+    const slamR4 = seed(store, { tournament: 'US Open', major: true, stage: 'Round 4', start: ago(1) });
+    const slamR3 = seed(store, { tournament: 'US Open', major: true, stage: 'Round 3', start: ago(2) });
+    const tennisCol: Collection = { id: 'tennis', title: 'Tennis', kind: 'sport', sport: 'tennis', keep: { tournaments: { finishedWithinDays: 7, fromStage: 'qf', majorsFromStage: 'r16' } }, publish: true };
+    const c = buildCatalog(store, { prefs, sources: loadSources(repoRoot()), collections: { publishing: loadCollections(repoRoot()).publishing, collections: [tennisCol] }, now: NOW, configRevision: 't' });
+    const items = c.collections[0]!.items.map((i) => i.video.videoId);
+    expect(items).toEqual([slamR4, recentF, recentQf]); // newest upload first
+    expect(items).not.toContain(recentR2);
+    expect(items).not.toContain(slamR3);
   });
 });

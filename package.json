@@ -16,7 +16,8 @@
     "catalog": "tsx engine/src/cli.ts catalog",
     "youtube-login": "tsx engine/src/cli.ts youtube-login",
     "sync-playlists": "tsx engine/src/cli.ts sync-playlists",
-    "migrate": "tsx engine/src/cli.ts migrate"
+    "migrate": "tsx engine/src/cli.ts migrate",
+    "retire-playlist": "tsx engine/src/cli.ts retire-playlist"
   },
   "devDependencies": {
     "@types/node": "^24.19.1",

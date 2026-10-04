@@ -1,8 +1,8 @@
 import { CATALOG_SCHEMA_VERSION, type CatalogCollection, type CatalogSnapshot } from '@sportscenter/contracts';
 import { describe, expect, it } from 'vitest';
-import { loadCollections, repoRoot, type CollectionsConfig } from '../src/config.ts';
+import { loadCollections, repoRoot, type Collection, type CollectionsConfig } from '../src/config.ts';
 import type { JsonResponse } from '../src/http.ts';
-import { planSync, playlistMarker, quotaDay, syncPlaylists, type RemoteItem, type SyncOptions } from '../src/publish/youtube-playlists.ts';
+import { planSync, playlistMarker, quotaDay, retirePlaylist, syncPlaylists, type RemoteItem, type SyncOptions } from '../src/publish/youtube-playlists.ts';
 import { Store } from '../src/store.ts';
 import type { ApiRequest, ApiTransport } from '../src/youtube/oauth.ts';
 
@@ -60,6 +60,15 @@ class FakeYouTube {
     const q = req.url.searchParams;
     const body = req.body as { id?: string; snippet: { playlistId: string; position: number; resourceId: { videoId: string }; title: string; description: string }; status?: { privacyStatus: string } };
     if (ep === 'channels') return { status: 200, body: { items: [{ id: ME }] } };
+    if (ep === 'playlists' && req.method === 'GET' && q.get('id')) {
+      const p = this.playlists.get(q.get('id')!);
+      return { status: 200, body: { items: p ? [{ id: p.id, snippet: { channelId: p.channelId, title: p.title, description: p.description } }] : [] } };
+    }
+    if (ep === 'playlists' && req.method === 'DELETE') {
+      this.mutations++;
+      this.playlists.delete(q.get('id')!);
+      return { status: 204, body: null };
+    }
     if (ep === 'playlists' && req.method === 'GET') {
       const mine = [...this.playlists.values()].filter((p) => p.channelId === ME).map((p) => ({ id: p.id, snippet: { channelId: p.channelId, title: p.title, description: p.description } }));
       return { status: 200, body: this.page(mine, req) };
@@ -96,7 +105,9 @@ class FakeYouTube {
 }
 
 const baseConfig = loadCollections(repoRoot());
-function config(over: Partial<CollectionsConfig['publishing']> = {}, collections = baseConfig.collections.filter((c) => c.id === 'nfl')): CollectionsConfig {
+const NFL: Collection = { id: 'nfl', title: 'SportsCenter · NFL', kind: 'sport', sport: 'nfl', keep: { last: 50 }, publish: true };
+const BILLS: Collection = { id: 'bills', title: 'SportsCenter · Bills', kind: 'team', sport: 'nfl', team: 'BUF', keep: { last: 7 }, publish: true };
+function config(over: Partial<CollectionsConfig['publishing']> = {}, collections: Collection[] = [NFL]): CollectionsConfig {
   return { publishing: { ...baseConfig.publishing, writesPerCollectionPerRun: 100, ...over }, collections };
 }
 
@@ -114,7 +125,7 @@ function catalog(videos: string[], over: Partial<CatalogCollection> = {}, genera
     titleOverrides: { includeFlaggedTitles: false, includeUnreviewedTitles: false },
     collections: [
       {
-        id, title: 'SportsCenter · NFL', kind: 'sport', publish: true, status: 'complete', issues: [],
+        id, title: 'SportsCenter · NFL', kind: 'sport', publish: true, rule: 'last 50 events', status: 'complete', issues: [],
         window: { start: '2026-09-10T12:00:00.000Z', end: NOW }, coverage: { storedHistoryFrom: null },
         items: videos.map((v, i) => item(v, i)), exclusions: [], ...over,
       },
@@ -362,7 +373,7 @@ describe('syncPlaylists', () => {
   it('caps writes per collection per run, in configured collection order', async () => {
     const store = new Store(':memory:');
     const yt = new FakeYouTube();
-    const two = [baseConfig.collections.find((c) => c.id === 'nfl')!, { ...baseConfig.collections.find((c) => c.id === 'bills')!, publish: true }];
+    const two = [NFL, BILLS];
     const cat = catalog(['a', 'b', 'c']);
     cat.collections.push({ ...cat.collections[0]!, id: 'bills', title: 'SportsCenter · Bills' });
     const cfg = config({ writesPerCollectionPerRun: 2 }, two);
@@ -374,5 +385,27 @@ describe('syncPlaylists', () => {
     r = await sync(store, yt, cat, { config: cfg });
     r = await sync(store, yt, cat, { config: cfg });
     expect(r.collections.every((c) => c.outcome === 'in_sync')).toBe(true);
+  });
+
+  it('retires an engine-owned playlist on request, and refuses anything it did not create', async () => {
+    const store = new Store(':memory:');
+    const yt = new FakeYouTube();
+    await sync(store, yt, catalog(['a']));
+    const id = tracked(store)!.playlistId!;
+    const own = yt.add(ME, 'SportsCenter · NFL', 'my own list without a marker', ['x']);
+
+    // A tracked ID that points at a playlist without this install's marker is refused.
+    store.setPublishPlaylist({ ...tracked(store)!, playlistId: own.id }, NOW);
+    let r = await retirePlaylist({ store, transport: yt.transport, config: config(), collectionId: 'nfl', runId: 'ret-1', now: () => NOW });
+    expect(r.outcome).toBe('refused');
+    expect(yt.playlists.has(own.id)).toBe(true);
+
+    store.setPublishPlaylist({ ...tracked(store)!, playlistId: id }, NOW);
+    r = await retirePlaylist({ store, transport: yt.transport, config: config(), collectionId: 'nfl', runId: 'ret-2', now: () => NOW });
+    expect(r).toMatchObject({ outcome: 'deleted', playlistId: id });
+    expect(yt.playlists.has(id)).toBe(false);
+    expect(tracked(store)).toBeUndefined();
+    expect(yt.playlists.has(own.id)).toBe(true);
+    expect((await retirePlaylist({ store, transport: yt.transport, config: config(), collectionId: 'nfl', runId: 'ret-3', now: () => NOW })).outcome).toBe('refused');
   });
 });

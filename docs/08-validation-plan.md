@@ -94,6 +94,18 @@ Sequencing (user decision 2026-10-03): F1, soccer, tennis and cricket are built 
 
 **Design deviations from the engine plan (2026-10-03):** each sport runs its own discovery (one uploads scan per source per sport) instead of a single combined channel scan, matching per-sport failure isolation; spoiler terms live in one per-sport table in `spoilers.ts` rather than behind the adapter interface; backfills may scan up to 60 uploads pages (hourly runs keep 20).
 
+**Playlist rules (user decisions 2026-10-03, after the Onn check):** every playlist is ordered newest YouTube upload first. Membership counts only watchable highlights:
+
+| Playlist | Keeps |
+| --- | --- |
+| This Week | every event from the last 7 days, no count limit, tennis excluded |
+| Bills, 49ers, Arsenal, Real Madrid, India | last 7 games of that team |
+| F1 | last 7 races |
+| Cricket | last 14 matches of followed nations |
+| Tennis | tournaments in progress or finished in the last 7 days; quarterfinals onward (Grand Slams: round of 16 onward) |
+
+The combined NFL and Soccer playlists were dropped (the team playlists cover them) and deleted with `pnpm retire-playlist`, which only deletes tracked playlists carrying this install's marker. Publishing runs in the hourly job after the catalog step.
+
 **Publish log:**
 - 2026-10-03: first publish to channel `UCyR-Z8qASx9PoEuRow1M4LA` (new Google account, OAuth app "YouTubePro"): 10 private playlists, 47 placements (tennis held back). Newly created playlists returned `playlistNotFound` for about a minute (propagation), so items were added on the next run; the publisher now reports this as "created, filled next run" instead of "missing". A second apply against unchanged input made zero changes (11 read units). Day total ≈ 2,900 units.
 - 2026-10-03: tennis published after the user accepted the ATP name-order hint: tennis playlist (30) created and filled on the next run (propagation handled automatically); `this-week` gained 10 tennis matches (15 total). 11 playlists in all; a further apply made zero changes.

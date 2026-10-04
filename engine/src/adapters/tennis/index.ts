@@ -242,6 +242,21 @@ const playersMatch = (e: SportEvent, p: ParsedTennisTitle) => {
 
 const duration = (e: SportEvent) => (e.meta.major ? MAJOR_MATCH_MS : TOUR_MATCH_MS);
 
+/**
+ * Players left at this stage: QF 8, SF 4, F 2, "Round of 16" 16. Numbered rounds only have a fixed meaning in a
+ * Grand Slam's 128-player main draw (Round 4 = 16 left); on tour their size depends on the draw, so undefined.
+ */
+export function playersLeft(stage: string | null, major: boolean): number | undefined {
+  const r = normalizeRound(stage ?? '');
+  if (r === 'qf') return 8;
+  if (r === 'sf') return 4;
+  if (r === 'f') return 2;
+  const n = Number(/^round (\d+)$/.exec(r)?.[1]);
+  if (!n) return undefined;
+  if (n >= 8) return n; // "Round of 16"
+  return major ? 128 / 2 ** (n - 1) : undefined;
+}
+
 export const tennisAdapter: SportAdapter<ParsedTennisTitle> = {
   sport: 'tennis',
   label: 'Tennis',
@@ -273,4 +288,5 @@ export const tennisAdapter: SportAdapter<ParsedTennisTitle> = {
   estimatedDurationMs: duration,
   neutralTitle: (e) => e.participants.map((p) => p.name).join(' vs '),
   subtitle: (e) => `${e.competition}${e.stage ? ` · ${e.stage}` : ''}`,
+  tournament: (e) => ({ id: String(e.meta.tournamentId ?? e.competition), major: !!e.meta.major, playersLeft: playersLeft(e.stage, !!e.meta.major) }),
 };

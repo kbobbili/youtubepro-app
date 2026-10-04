@@ -474,3 +474,48 @@ async function syncCollection(
   report.backlog = ops.length - done;
   report.outcome = report.backlog ? 'partial' : 'applied';
 }
+
+// ---- Retire ----------------------------------------------------------------------
+
+export interface RetireReport {
+  collectionId: string;
+  playlistId?: string;
+  outcome: 'deleted' | 'already_gone' | 'refused';
+  reason?: string;
+  units: number;
+}
+
+/**
+ * Delete one engine-owned playlist on explicit request and stop tracking it. Refuses unless the playlist is tracked,
+ * owned by the authenticated channel, and still carries this install's collection marker, so it can never delete a
+ * playlist the engine did not create. Counts against the same daily budget.
+ */
+export async function retirePlaylist(o: { store: Store; transport: ApiTransport; config: CollectionsConfig; collectionId: string; runId: string; now: () => string }): Promise<RetireReport> {
+  const { store } = o;
+  const startedAt = o.now();
+  const day = quotaDay(startedAt);
+  store.startPublishRun({ id: o.runId, startedAt, quotaDay: day, mode: 'apply' });
+  const api = new PublishApi(o.transport, store.publishUnitsOn(day), o.config.publishing.dailyBudgetUnits, (calls, units) => store.recordPublishCalls(o.runId, calls, units));
+  const done = (r: Omit<RetireReport, 'collectionId' | 'units'>): RetireReport => {
+    const report = { collectionId: o.collectionId, units: api.units, ...r };
+    store.finishPublishRun(o.runId, o.now(), r.outcome === 'refused' ? 'failed' : 'ok', { retire: report });
+    return report;
+  };
+  const tracked = store.publishPlaylist(o.collectionId);
+  if (!tracked?.playlistId) return done({ outcome: 'refused', reason: 'collection has no tracked playlist' });
+  const me = (await api.request('channels', 'GET', { part: 'id', mine: 'true' })) as { items?: { id: string }[] };
+  if (me.items?.[0]?.id !== tracked.channelId) return done({ outcome: 'refused', playlistId: tracked.playlistId, reason: `tracked playlist belongs to channel ${tracked.channelId}` });
+  const found = (await api.request('playlists', 'GET', { part: 'snippet', id: tracked.playlistId })) as { items?: { id: string; snippet: { channelId: string; description?: string } }[] };
+  const p = found.items?.[0];
+  if (!p) {
+    store.deletePublishPlaylist(o.collectionId);
+    return done({ outcome: 'already_gone', playlistId: tracked.playlistId });
+  }
+  const marker = playlistMarker(tracked.installId, o.collectionId);
+  if (p.snippet.channelId !== tracked.channelId || !(p.snippet.description ?? '').includes(marker)) {
+    return done({ outcome: 'refused', playlistId: tracked.playlistId, reason: `playlist does not carry ${marker}` });
+  }
+  await api.request('playlists', 'DELETE', { id: tracked.playlistId });
+  store.deletePublishPlaylist(o.collectionId);
+  return done({ outcome: 'deleted', playlistId: tracked.playlistId });
+}

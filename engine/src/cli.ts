@@ -9,7 +9,7 @@ import type { Cohort, RunKind, Window } from './domain.ts';
 import { liveTransport, recordingTransport, replayTransport, type Transport } from './http.ts';
 import { adapterFor, ADAPTERS } from './adapters/index.ts';
 import { discover, type DiscoverResult } from './pipeline.ts';
-import { syncPlaylists, type SyncReport } from './publish/youtube-playlists.ts';
+import { retirePlaylist, syncPlaylists, type SyncReport } from './publish/youtube-playlists.ts';
 import { buildReport } from './report.ts';
 import { buildSnapshot, writeSnapshot } from './snapshot.ts';
 import { Store } from './store.ts';
@@ -24,6 +24,7 @@ const USAGE = `Usage:
   pnpm catalog [--out FILE] [--offline]
   pnpm youtube-login
   pnpm sync-playlists [--apply] [--catalog FILE] [--retry-create COLLECTION] [--json]
+  pnpm retire-playlist <collectionId>   (deletes that engine-owned playlist from YouTube and stops tracking it)
   pnpm migrate [--db FILE]
   pnpm review <eventId> <videoId> correct|wrong [--notes TEXT]
   pnpm review --playback <videoId> verified|failed --env target-tv|browser [--notes TEXT]`;
@@ -253,6 +254,23 @@ ${r.sport.toUpperCase()} report  cohort=${r.cohort}  kind=${r.kind}`);
           if (values.json) console.log(JSON.stringify(report, null, 2));
           else printSync(report, catalog);
           return report.status === 'ok' ? 0 : report.status === 'failed' ? 2 : 3;
+        } finally {
+          store.close();
+        }
+      });
+    }
+    case 'retire-playlist': {
+      const collectionId = positionals[0];
+      if (!collectionId) throw new Error(USAGE);
+      return withLock(ENGINE_LOCK, async () => {
+        const store = new Store(dbFile);
+        try {
+          const r = await retirePlaylist({
+            store, transport: authorizedTransport(new TokenProvider(oauthClientFromEnv(), tokenFile)), config: loadCollections(root), collectionId,
+            runId: `retire-${now().slice(0, 19).replace(/[:T]/g, '')}-${randomUUID().slice(0, 8)}`, now,
+          });
+          console.log(`[${r.collectionId}] ${r.outcome}${r.playlistId ? `  playlist=${r.playlistId}` : ''}${r.reason ? `  (${r.reason})` : ''}  ${r.units} units`);
+          return r.outcome === 'refused' ? 2 : 0;
         } finally {
           store.close();
         }

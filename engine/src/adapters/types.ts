@@ -26,6 +26,8 @@ export interface SportAdapter<P = unknown> {
   /** Spoiler-free label generated from event data, never from publisher metadata. */
   neutralTitle(e: SportEvent): string;
   subtitle(e: SportEvent): string;
+  /** Tournament-shaped sports only: which tournament the event belongs to and how many players were left. */
+  tournament?(e: SportEvent): { id: string; major: boolean; playersLeft?: number };
 }
 
 export interface FetchContext {
