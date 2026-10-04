@@ -7,7 +7,8 @@ import { generateCatalog, writeCatalog } from './catalog.ts';
 import { configRevision, loadCollections, loadEnv, loadPreferences, loadSources, repoRoot, youtubeApiKey } from './config.ts';
 import type { Cohort, RunKind, Window } from './domain.ts';
 import { liveTransport, recordingTransport, replayTransport, type Transport } from './http.ts';
-import { discoverNfl, type DiscoverResult } from './pipeline.ts';
+import { adapterFor, ADAPTERS } from './adapters/index.ts';
+import { discover, type DiscoverResult } from './pipeline.ts';
 import { syncPlaylists, type SyncReport } from './publish/youtube-playlists.ts';
 import { buildReport } from './report.ts';
 import { buildSnapshot, writeSnapshot } from './snapshot.ts';
@@ -16,9 +17,9 @@ import { YouTubeClient } from './youtube/client.ts';
 import { authorizedTransport, login, oauthClientFromEnv, TokenProvider } from './youtube/oauth.ts';
 
 const USAGE = `Usage:
-  pnpm discover nfl [--days 7 | --from YYYY-MM-DD --to YYYY-MM-DD] [--all-teams] [--kind manual|prospective|backfill]
+  pnpm discover <nfl|f1|soccer|tennis|cricket> [--days 7 | --from YYYY-MM-DD --to YYYY-MM-DD] [--all-teams] [--kind manual|prospective|backfill]
                     [--record DIR | --replay DIR] [--now ISO] [--db FILE]
-  pnpm report [--cohort personal|diagnostic] [--kind all|prospective|backfill|manual] [--json]
+  pnpm report [--sport SPORT] [--cohort personal|diagnostic] [--kind all|prospective|backfill|manual] [--json]
   pnpm snapshot [--days 7] [--out FILE]
   pnpm catalog [--out FILE] [--offline]
   pnpm youtube-login
@@ -71,20 +72,21 @@ const pad = (s: string, n: number) => (s.length >= n ? s.slice(0, n) : s + ' '.r
 const mins = (s: number | null | undefined) => (s == null ? '?' : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`);
 
 function printDiscover(r: DiscoverResult, cohort: Cohort): void {
-  console.log(`Run ${r.runId}  cohort=${cohort}  status=${r.status.toUpperCase()}`);
+  const adapter = adapterFor(r.sport);
+  console.log(`Run ${r.runId}  sport=${r.sport}  cohort=${cohort}  status=${r.status.toUpperCase()}`);
   console.log(`Window (UTC, by event start): ${r.window.start} → ${r.window.end}`);
   for (const s of r.scans) {
     console.log(`Scan ${s.sourceId}: ${s.items} uploads since ${s.since}, ${s.pages} page(s), ${s.complete ? 'complete' : 'INCOMPLETE'} (${s.stopReason})`);
   }
   console.log('');
-  console.log(`${pad('Event (wanted)', 44)} ${pad('Week', 4)} ${pad('Discovery', 22)} ${pad('Video', 12)} ${pad('Dur', 6)} ${pad('Conf', 4)}  Notes`);
+  console.log(`${pad('Event (wanted)', 52)} ${pad('Stage', 14)} ${pad('Discovery', 22)} ${pad('Video', 12)} ${pad('Dur', 6)} ${pad('Conf', 4)}  Notes`);
   for (const o of r.outcomes) {
     const e = o.event;
-    const label = `${e.away.abbr} @ ${e.home.abbr}  ${e.startTime.slice(0, 16).replace('T', ' ')}Z`;
+    const label = `${adapter.neutralTitle(e)}  ${e.startTime.slice(0, 16).replace('T', ' ')}Z`;
     const disc = o.discovery === 'SEARCHING' && !o.scanComplete ? 'SEARCHING (incomplete)' : o.discovery;
     const notes = [...(o.primary?.flags ?? []), ...(o.primary ? [] : o.ineligibleReasons), ...(o.primary ? ['tv:NOT_TESTED'] : [])].join(', ');
     console.log(
-      `${pad(label, 44)} ${pad(String(e.week), 4)} ${pad(disc, 22)} ${pad(o.primary?.videoId ?? '-', 12)} ${pad(mins(o.primary?.durationSeconds), 6)} ${pad(o.primary ? o.primary.confidence.toFixed(2) : '-', 4)}  ${notes}`,
+      `${pad(label, 52)} ${pad(e.stage ?? '', 14)} ${pad(disc, 22)} ${pad(o.primary?.videoId ?? '-', 12)} ${pad(mins(o.primary?.durationSeconds), 6)} ${pad(o.primary ? o.primary.confidence.toFixed(2) : '-', 4)}  ${notes}`,
     );
   }
   const done = r.outcomes.filter((o) => o.event.status === 'COMPLETED');
@@ -126,7 +128,7 @@ async function main(argv: string[]): Promise<number> {
       days: { type: 'string' }, from: { type: 'string' }, to: { type: 'string' },
       'all-teams': { type: 'boolean' }, kind: { type: 'string' }, cohort: { type: 'string' },
       record: { type: 'string' }, replay: { type: 'string' }, now: { type: 'string' }, db: { type: 'string' },
-      out: { type: 'string' }, json: { type: 'boolean' }, notes: { type: 'string' }, playback: { type: 'string' }, env: { type: 'string' },
+      out: { type: 'string' }, json: { type: 'boolean' }, sport: { type: 'string' }, notes: { type: 'string' }, playback: { type: 'string' }, env: { type: 'string' },
       offline: { type: 'boolean' }, apply: { type: 'boolean' }, catalog: { type: 'string' }, 'retry-create': { type: 'string', multiple: true },
     },
   });
@@ -136,10 +138,11 @@ async function main(argv: string[]): Promise<number> {
 
   switch (command) {
     case 'discover': {
-      if (positionals[0] !== 'nfl') throw new Error('Only `nfl` is supported in this spike');
+      const adapter = adapterFor(positionals[0] ?? '');
       const kind = (values.kind ?? 'manual') as RunKind;
       if (!['manual', 'prospective', 'backfill'].includes(kind)) throw new Error('--kind must be manual|prospective|backfill');
       const cohort: Cohort = values['all-teams'] ? 'diagnostic' : 'personal';
+      if (cohort === 'diagnostic' && adapter.sport !== 'nfl') throw new Error('--all-teams (diagnostic cohort) is NFL-only');
       let transport: Transport;
       let apiKey: string;
       if (values.replay) {
@@ -153,8 +156,8 @@ async function main(argv: string[]): Promise<number> {
       return withLock(ENGINE_LOCK, async () => {
         const store = new Store(dbFile);
         try {
-          const result = await discoverNfl({
-            store, eventsTransport: transport, youtube: new YouTubeClient(transport, apiKey), sources: loadSources(root),
+          const result = await discover({
+            adapter, store, eventsTransport: transport, youtube: new YouTubeClient(transport, apiKey), sources: loadSources(root),
             prefs: loadPreferences(root), window, cohort, kind, runId: `${now().slice(0, 19).replace(/[:T]/g, '')}-${randomUUID().slice(0, 8)}`, now,
           });
           printDiscover(result, cohort);
@@ -168,14 +171,15 @@ async function main(argv: string[]): Promise<number> {
       const store = new Store(dbFile);
       try {
         const cohort = (values.cohort ?? 'personal') as Cohort;
-        const report = buildReport(store, cohort, (values.kind ?? 'all') as RunKind | 'all');
-        if (values.json) console.log(JSON.stringify(report, null, 2));
-        else {
-          const r = report;
-          console.log(`NFL report  cohort=${r.cohort}  kind=${r.kind}`);
+        const sports = values.sport ? [adapterFor(values.sport).sport] : ADAPTERS.map((a) => a.sport);
+        const reports = sports.map((sp) => buildReport(store, cohort, (values.kind ?? 'all') as RunKind | 'all', sp));
+        if (values.json) console.log(JSON.stringify(reports, null, 2));
+        else for (const r of reports) {
+          console.log(`
+${r.sport.toUpperCase()} report  cohort=${r.cohort}  kind=${r.kind}`);
           console.log(`Runs: ${r.runs.total} (ok ${r.runs.ok}, incomplete ${r.runs.incomplete}, failed ${r.runs.failed}); observation days ${r.runs.observationDays}; ${r.runs.firstStartedAt ?? '-'} → ${r.runs.lastStartedAt ?? '-'}`);
           console.log('Sport | Eligible events | Matched | Metadata eligible | Missing | Pending | Target-TV verified | Audited correct/wrong/unaudited');
-          console.log(`NFL   | ${r.eligibleEvents} | ${r.matched} | ${r.metadataEligible} | ${r.unavailable} | ${r.pending} | ${r.playback.targetTvVerified} (failed ${r.playback.targetTvFailed}) | ${r.audits.correct}/${r.audits.wrong}/${r.audits.unaudited}`);
+          console.log(`${r.sport.padEnd(5)} | ${r.eligibleEvents} | ${r.matched} | ${r.metadataEligible} | ${r.unavailable} | ${r.pending} | ${r.playback.targetTvVerified} (failed ${r.playback.targetTvFailed}) | ${r.audits.correct}/${r.audits.wrong}/${r.audits.unaudited}`);
           console.log(`Events never fully scanned: ${r.incompleteOnly}`);
           console.log(`Latency: median publish vs ESTIMATED end ${r.latency.medianMinutesAfterEstimatedEnd ?? 'unknown'} min (estimate); events with observed completion bounds ${r.latency.eventsWithObservedCompletionBounds}; median publish→discovery ${r.latency.medianMinutesPublishToDiscovery ?? 'n/a'} min (cadence-limited)`);
           console.log(`YouTube quota used across runs ≈ ${r.quotaUnits} units`);

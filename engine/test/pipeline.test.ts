@@ -3,7 +3,9 @@ import { describe, expect, it } from 'vitest';
 import { loadPreferences, loadSources, repoRoot, type Preferences, type Source } from '../src/config.ts';
 import type { Cohort, RunKind, Window } from '../src/domain.ts';
 import type { Transport } from '../src/http.ts';
-import { discoverNfl } from '../src/pipeline.ts';
+import { nflAdapter } from '../src/adapters/nfl/index.ts';
+import type { NflEvent } from '../src/domain.ts';
+import { discover, type EventOutcome } from '../src/pipeline.ts';
 import { buildReport } from '../src/report.ts';
 import { buildSnapshot } from '../src/snapshot.ts';
 import { Store } from '../src/store.ts';
@@ -20,11 +22,13 @@ let runSeq = 0;
 function run(store: Store, o: { cohort?: Cohort; kind?: RunKind; now?: string; transport?: Transport; sources?: Source[]; prefs?: Preferences } = {}) {
   const transport = o.transport ?? w3Transport();
   const now = o.now ?? AFTER_CUTOFF;
-  return discoverNfl({
-    store, eventsTransport: transport, youtube: new YouTubeClient(transport, 'test'), sources: o.sources ?? sources, prefs: o.prefs ?? prefs,
+  return discover({
+    adapter: nflAdapter, store, eventsTransport: transport, youtube: new YouTubeClient(transport, 'test'), sources: o.sources ?? sources, prefs: o.prefs ?? prefs,
     window: WEEK3, cohort: o.cohort ?? 'personal', kind: o.kind ?? 'backfill', runId: `run-${++runSeq}`, now: () => now,
   });
 }
+
+const nfl = (o: EventOutcome) => o.event as NflEvent;
 
 const count = (store: Store, table: string) => (store.db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
 
@@ -53,7 +57,7 @@ describe('NFL discovery pipeline (recorded Week 3 fixtures)', () => {
     const store = new Store(':memory:');
     const r = await run(store);
     expect(r.status).toBe('ok');
-    const found = Object.fromEntries(r.outcomes.map((o) => [`${o.event.away.abbr}@${o.event.home.abbr}`, o.primary?.videoId]));
+    const found = Object.fromEntries(r.outcomes.map((o) => [`${nfl(o).away.abbr}@${nfl(o).home.abbr}`, o.primary?.videoId]));
     expect(found).toEqual({ 'LAC@BUF': 'v__pg6qIYL4', 'ARI@SF': '7ngu-tT0PQs' });
   });
 
@@ -133,7 +137,7 @@ describe('NFL discovery pipeline (recorded Week 3 fixtures)', () => {
     const store = new Store(':memory:');
     await run(store);
     const r = await run(store, { transport: withoutVideo('v__pg6qIYL4') });
-    const buf = r.outcomes.find((o) => o.event.home.abbr === 'BUF')!;
+    const buf = r.outcomes.find((o) => nfl(o).home.abbr === 'BUF')!;
     expect(buf.discovery).toBe('UNAVAILABLE');
     expect(store.db.prepare("SELECT COUNT(*) AS n FROM highlights WHERE event_id = 'nfl:espn:401872953'").get()).toEqual({ n: 0 });
     expect(buildSnapshot(store, prefs, sources, AFTER_CUTOFF).items.map((i) => i.video.videoId)).toEqual(['7ngu-tT0PQs']);
@@ -142,14 +146,14 @@ describe('NFL discovery pipeline (recorded Week 3 fixtures)', () => {
   it('before the cutoff, a missing highlight stays SEARCHING', async () => {
     const store = new Store(':memory:');
     const r = await run(store, { transport: withoutVideo('v__pg6qIYL4'), now: '2026-09-28T12:00:00.000Z' });
-    expect(r.outcomes.find((o) => o.event.home.abbr === 'BUF')!.discovery).toBe('SEARCHING');
+    expect(r.outcomes.find((o) => nfl(o).home.abbr === 'BUF')!.discovery).toBe('SEARCHING');
   });
 
   it('rejects videos from an unregistered channel even when titles match', async () => {
     const store = new Store(':memory:');
     const impostor = fixtureTransport(W3, (v) => (v.id === '7ngu-tT0PQs' ? { ...v, snippet: { ...v.snippet, channelId: 'UCimpostorimpostorimpos' } } : v));
     const r = await run(store, { transport: impostor });
-    const sf = r.outcomes.find((o) => o.event.home.abbr === 'SF')!;
+    const sf = r.outcomes.find((o) => nfl(o).home.abbr === 'SF')!;
     expect(sf.discovery).not.toBe('FOUND');
     expect(sf.ineligibleReasons).toContain('channel_mismatch');
   });

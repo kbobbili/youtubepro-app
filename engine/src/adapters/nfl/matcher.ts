@@ -1,4 +1,5 @@
-import type { SportEvent } from '../../domain.ts';
+import type { NflEvent } from '../../domain.ts';
+import type { MatchInput, MatchResult } from '../types.ts';
 import { resolveNflTeam } from './teams.ts';
 
 /**
@@ -50,25 +51,11 @@ export function parseNflHighlightTitle(title: string): TitleParse {
   };
 }
 
-export interface MatchInput {
-  videoId: string;
-  title: string;
-  publishedAt: string;
-  durationSeconds?: number;
-}
-
-export interface MatchResult {
-  matched: boolean;
-  confidence: number;
-  flags: string[];
-  rejectionReason?: string;
-}
-
 /**
  * Identity is required: both teams, season, regular-season week. Publish timing and duration
  * only adjust confidence. Returns matched=false with a reason when identity fails.
  */
-export function matchNflCandidate(event: SportEvent, parsed: ParsedNflTitle, input: MatchInput): MatchResult {
+export function matchNflCandidate(event: NflEvent, parsed: ParsedNflTitle, input: MatchInput): MatchResult {
   const flags: string[] = [];
   const teams = new Set([parsed.first, parsed.second]);
   if (!teams.has(event.home.abbr) || !teams.has(event.away.abbr)) return { matched: false, confidence: 0, flags, rejectionReason: 'teams_differ' };

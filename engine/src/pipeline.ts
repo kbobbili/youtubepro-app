@@ -1,5 +1,4 @@
-import { fetchNflEvents } from './adapters/nfl/espn.ts';
-import { ESTIMATED_GAME_DURATION_MS, matchNflCandidate, parseNflHighlightTitle } from './adapters/nfl/matcher.ts';
+import type { SportAdapter } from './adapters/types.ts';
 import { trustedSources, type Preferences, type Source } from './config.ts';
 import type { Cohort, DiscoveryStatus, RunIssue, RunKind, RunStatus, SportEvent, Window } from './domain.ts';
 import type { Transport } from './http.ts';
@@ -12,6 +11,7 @@ import { blocksPlayback, screenVideo } from './youtube/screen.ts';
 export const DISCOVERY_CUTOFF_MS = 72 * 3_600_000;
 
 export interface DiscoverOptions {
+  adapter: SportAdapter;
   store: Store;
   eventsTransport: Transport;
   youtube: YouTubeClient;
@@ -35,6 +35,7 @@ export interface EventOutcome {
 
 export interface DiscoverResult {
   runId: string;
+  sport: string;
   status: RunStatus;
   issues: RunIssue[];
   window: Window;
@@ -43,75 +44,77 @@ export interface DiscoverResult {
   quota: { calls: Record<string, number>; estimatedUnits: number };
 }
 
-export function followedNflTeams(prefs: Preferences): Set<string> {
-  const nfl = prefs.sports.nfl;
-  return new Set(nfl?.enabled ? nfl.teams.map((t) => t.abbr) : []);
+interface Pair {
+  event: SportEvent;
+  item: UploadItem;
+  source: Source;
+  parsed: unknown;
 }
 
-export function isFollowed(event: SportEvent, followed: Set<string>): boolean {
-  return followed.has(event.home.abbr) || followed.has(event.away.abbr);
-}
-
-/** Spoiler-free label generated from event data, never from publisher metadata. */
-export function neutralTitle(event: SportEvent): string {
-  return `${event.away.name} at ${event.home.name}`;
-}
-
-export async function discoverNfl(o: DiscoverOptions): Promise<DiscoverResult> {
-  const { store, youtube, window, cohort } = o;
+/**
+ * One discovery run for one sport: events → preferences → per-event trusted sources → one uploads scan per
+ * source → match, screen, persist. Sports run independently so one sport's failure never blocks another.
+ */
+export async function discover(o: DiscoverOptions): Promise<DiscoverResult> {
+  const { adapter, store, youtube, window, cohort } = o;
+  const sport = adapter.sport;
   const issues: RunIssue[] = [];
   const startedAt = o.now();
-  const followed = followedNflTeams(o.prefs);
 
   store.startRun({
-    id: o.runId, sport: 'nfl', cohort, kind: o.kind, startedAt, window,
-    config: { region: o.prefs.region, followed: [...followed].sort(), cutoffHours: DISCOVERY_CUTOFF_MS / 3_600_000 },
+    id: o.runId, sport, cohort, kind: o.kind, startedAt, window,
+    config: { region: o.prefs.region, prefs: o.prefs.sports[sport as keyof Preferences['sports']] ?? null, cutoffHours: DISCOVERY_CUTOFF_MS / 3_600_000 },
   });
 
   // 1. What happened?
-  const fetched = await fetchNflEvents(o.eventsTransport, window);
+  const fetched = await adapter.fetchEvents({ transport: o.eventsTransport, window, prefs: o.prefs, store, now: startedAt });
   for (const msg of fetched.issues) issues.push({ stage: 'events', message: msg });
 
-  // 2. Do I care? Diagnostic runs consider every game but never change preferences.
-  const tracked = fetched.events.filter((e) => e.status !== 'POSTPONED' && e.status !== 'CANCELLED' && (cohort === 'diagnostic' || isFollowed(e, followed)));
+  // 2. Do I care? Diagnostic runs consider every event but never change preferences.
+  const decisions = new Map(fetched.events.map((e) => [e.id, adapter.follow(e, o.prefs)]));
+  const playable = (e: SportEvent) => e.status !== 'POSTPONED' && e.status !== 'CANCELLED';
+  const tracked = fetched.events.filter((e) => playable(e) && (cohort === 'diagnostic' || decisions.get(e.id)!.followed));
+  const unknown = fetched.events.filter((e) => playable(e) && decisions.get(e.id)!.unknown);
+  if (unknown.length) issues.push({ stage: 'eligibility', message: `${unknown.length} event(s) with unknown eligibility (${decisions.get(unknown[0]!.id)!.reason ?? 'unknown'})` });
   store.tx(() => {
     for (const e of fetched.events) {
       store.upsertEvent(e, startedAt, o.kind === 'prospective');
-      store.recordRunEvent(o.runId, e.id, tracked.includes(e));
+      const d = decisions.get(e.id)!;
+      store.recordRunEvent(o.runId, e.id, tracked.includes(e), d.reason ?? (d.unknown ? 'eligibility_unknown' : undefined));
     }
     for (const e of tracked) if (e.status !== 'COMPLETED') store.setDiscovery(e.id, 'WAITING_FOR_EVENT_END', startedAt);
   });
   const completed = tracked.filter((e) => e.status === 'COMPLETED');
 
-  // 3. Where is the trusted highlight?
+  // 3. Where is the trusted highlight? Sources resolve per event (competition and region).
+  const sourcesFor = new Map(completed.map((e) => [e.id, trustedSources(o.sources, sport, adapter.sourceCompetition(e), o.prefs.region)]));
+  const anySource = o.sources.some((s) => s.sport === sport && s.enabled && s.verification.status === 'verified' && s.regions.includes(o.prefs.region));
+  if (completed.length && !anySource) issues.push({ stage: 'sources', message: `No enabled, verified ${sport} source for region` });
+
+  const usedSources = new Map<string, Source>();
+  for (const list of sourcesFor.values()) for (const s of list) usedSources.set(s.id, s);
   const scans: DiscoverResult['scans'] = [];
-  const scanByEvent = new Map<string, boolean>();
-  const pairs: { event: SportEvent; item: UploadItem; source: Source }[] = [];
-  const sources = trustedSources(o.sources, 'nfl', 'NFL', o.prefs.region);
-  if (completed.length && !sources.length) issues.push({ stage: 'sources', message: 'No enabled, verified NFL source for region' });
-
+  const scanComplete = new Map<string, boolean>();
+  const pairs: Pair[] = [];
   let quotaExhausted = false;
-  if (completed.length) {
-    const since = completed.reduce((min, e) => (e.startTime < min ? e.startTime : min), completed[0]!.startTime);
-    for (const source of sources) {
-      let scan: UploadScan;
-      try {
-        const playlistId = await youtube.uploadsPlaylistId(source.channelId);
-        scan = await youtube.scanUploads(playlistId, since);
-      } catch (err) {
-        quotaExhausted ||= err instanceof QuotaExceededError;
-        scan = { playlistId: '?', items: [], pages: 0, complete: false, stopReason: 'error', error: (err as Error).message };
-      }
-      if (!scan.complete) issues.push({ stage: 'youtube', message: `${source.id}: uploads scan incomplete (${scan.stopReason}${scan.error ? `: ${scan.error}` : ''})` });
-      scans.push({ sourceId: source.id, since, pages: scan.pages, complete: scan.complete, stopReason: scan.stopReason, error: scan.error, items: scan.items.length });
-      for (const e of completed) scanByEvent.set(e.id, (scanByEvent.get(e.id) ?? true) && scan.complete);
-
-      for (const item of scan.items) {
-        const parsed = parseNflHighlightTitle(item.title);
-        if (!parsed.ok) continue;
-        const teams = new Set([parsed.value.first, parsed.value.second]);
-        for (const e of completed) if (teams.has(e.home.abbr) && teams.has(e.away.abbr)) pairs.push({ event: e, item, source });
-      }
+  for (const source of usedSources.values()) {
+    const events = completed.filter((e) => sourcesFor.get(e.id)!.some((s) => s.id === source.id));
+    const since = events.reduce((min, e) => (e.startTime < min ? e.startTime : min), events[0]!.startTime);
+    let scan: UploadScan;
+    try {
+      if (quotaExhausted) throw new QuotaExceededError('YouTube quota exceeded earlier in this run');
+      scan = await youtube.scanUploads(await youtube.uploadsPlaylistId(source.channelId), since);
+    } catch (err) {
+      quotaExhausted ||= err instanceof QuotaExceededError;
+      scan = { playlistId: '?', items: [], pages: 0, complete: false, stopReason: 'error', error: (err as Error).message };
+    }
+    if (!scan.complete) issues.push({ stage: 'youtube', message: `${source.id}: uploads scan incomplete (${scan.stopReason}${scan.error ? `: ${scan.error}` : ''})` });
+    scans.push({ sourceId: source.id, since, pages: scan.pages, complete: scan.complete, stopReason: scan.stopReason, error: scan.error, items: scan.items.length });
+    for (const e of events) scanComplete.set(e.id, (scanComplete.get(e.id) ?? true) && scan.complete);
+    for (const item of scan.items) {
+      const parsed = adapter.parseTitle(item.title);
+      if (parsed === undefined) continue;
+      for (const e of events) if (adapter.related(e, parsed)) pairs.push({ event: e, item, source, parsed });
     }
   }
 
@@ -138,13 +141,16 @@ export async function discoverNfl(o: DiscoverOptions): Promise<DiscoverResult> {
   const outcomes: EventOutcome[] = [];
   store.tx(() => {
     // Every looked-up candidate gets a metadata check and title screen, so 'unreviewed' exists only transiently.
-    if (metadataOk && ids.length) recordMetadataChecks(store, ids, metadata, o.prefs.region, () => 'nfl', now);
+    if (metadataOk && ids.length) recordMetadataChecks(store, ids, metadata, o.prefs.region, () => sport, now);
     for (const e of tracked) {
       if (e.status !== 'COMPLETED') {
         outcomes.push({ event: e, discovery: 'WAITING_FOR_EVENT_END', matchedCandidates: 0, ineligibleReasons: [], scanComplete: true });
         continue;
       }
-      const scanComplete = (scanByEvent.get(e.id) ?? false) && metadataOk && sources.length > 0;
+      const eventSources = sourcesFor.get(e.id)!;
+      // No trusted source for this competition is a known gap ("highlight unavailable"), not an incomplete scan.
+      const noSourceForCompetition = anySource && eventSources.length === 0;
+      const complete = noSourceForCompetition || ((scanComplete.get(e.id) ?? false) && metadataOk && eventSources.length > 0);
       const eventPairs = pairs.filter((p) => p.event.id === e.id);
       const seen = new Set(eventPairs.map((p) => p.item.videoId));
       const toEvaluate = [
@@ -162,12 +168,12 @@ export async function discoverNfl(o: DiscoverOptions): Promise<DiscoverResult> {
       for (const cand of toEvaluate) {
         if (!metadataOk) break; // Without metadata we cannot screen; keep prior state.
         const meta = metadata.get(cand.videoId);
-        const parsed = parseNflHighlightTitle(meta?.snippet.title ?? cand.title);
-        if (!parsed.ok) continue;
+        const title = meta?.snippet.title ?? cand.title;
+        const parsed = adapter.parseTitle(title);
+        if (parsed === undefined) continue;
         const durationSeconds = parseIsoDuration(meta?.contentDetails?.duration);
-        const match = matchNflCandidate(e, parsed.value, { videoId: cand.videoId, title: cand.title, publishedAt: cand.publishedAt, durationSeconds });
-        const screen = screenVideo(meta, o.prefs.region);
-        const reasons = [...screen.reasons];
+        const match = adapter.match(e, parsed, { videoId: cand.videoId, title: cand.title, publishedAt: cand.publishedAt, durationSeconds });
+        const reasons = [...screenVideo(meta, o.prefs.region).reasons];
         // Trust is re-checked per video: the channel must be the registered one.
         if (meta && meta.snippet.channelId !== cand.source.channelId) reasons.push('channel_mismatch');
         if (!match.matched) reasons.push(`no_match:${match.rejectionReason}`);
@@ -178,7 +184,7 @@ export async function discoverNfl(o: DiscoverOptions): Promise<DiscoverResult> {
         store.upsertCandidate(
           {
             eventId: e.id, videoId: cand.videoId, sourceId: cand.source.id, channelId: meta?.snippet.channelId ?? cand.source.channelId,
-            rawTitle: meta?.snippet.title ?? cand.title, publishedAt: meta?.snippet.publishedAt ?? cand.publishedAt,
+            rawTitle: title, publishedAt: meta?.snippet.publishedAt ?? cand.publishedAt,
             durationSeconds: durationSeconds ?? null, confidence: match.confidence, flags: match.flags,
             metadataEligible: eligible, metadataReasons: reasons,
           },
@@ -190,15 +196,18 @@ export async function discoverNfl(o: DiscoverOptions): Promise<DiscoverResult> {
       let status: DiscoveryStatus;
       const primary = metadataOk ? store.selectPrimary(e.id, now) : undefined;
       if (primary) status = 'FOUND';
-      else if (!scanComplete) status = previous && previous !== 'WAITING_FOR_EVENT_END' ? previous : 'SEARCHING'; // incomplete ≠ missing
-      else if (Date.parse(now) > Date.parse(e.startTime) + ESTIMATED_GAME_DURATION_MS + DISCOVERY_CUTOFF_MS) status = 'UNAVAILABLE';
+      else if (noSourceForCompetition) {
+        status = 'UNAVAILABLE';
+        ineligible.add(`no_trusted_source:${adapter.sourceCompetition(e)}`);
+      } else if (!complete) status = previous && previous !== 'WAITING_FOR_EVENT_END' ? previous : 'SEARCHING'; // incomplete ≠ missing
+      else if (Date.parse(now) > Date.parse(e.startTime) + adapter.estimatedDurationMs(e) + DISCOVERY_CUTOFF_MS) status = 'UNAVAILABLE';
       else status = 'SEARCHING';
       store.setDiscovery(e.id, status, now);
 
-      for (const source of sources) {
+      for (const source of eventSources) {
         store.recordAttempt({
-          runId: o.runId, eventId: e.id, sourceId: source.id, at: now, method: 'uploads_playlist', scanComplete,
-          outcome: primary ? 'found' : matchedCount ? 'matched_not_eligible' : scanComplete ? 'not_found' : 'incomplete',
+          runId: o.runId, eventId: e.id, sourceId: source.id, at: now, method: 'uploads_playlist', scanComplete: complete,
+          outcome: primary ? 'found' : matchedCount ? 'matched_not_eligible' : complete ? 'not_found' : 'incomplete',
           diagnostics: { matchedCandidates: matchedCount, ineligibleReasons: [...ineligible] },
         });
       }
@@ -210,14 +219,14 @@ export async function discoverNfl(o: DiscoverOptions): Promise<DiscoverResult> {
         )
         .get(e.id) as { video_id: string; confidence: number; duration_seconds: number | null; published_at: string; match_flags_json: string } | undefined;
       outcomes.push({
-        event: e, discovery: status, matchedCandidates: matchedCount, ineligibleReasons: [...ineligible], scanComplete,
+        event: e, discovery: status, matchedCandidates: matchedCount, ineligibleReasons: [...ineligible], scanComplete: complete,
         primary: row && { videoId: row.video_id, confidence: row.confidence, durationSeconds: row.duration_seconds, publishedAt: row.published_at, flags: JSON.parse(row.match_flags_json) },
       });
     }
   });
 
   const status: RunStatus = !fetched.complete && fetched.events.length === 0 ? 'failed' : issues.length ? 'incomplete' : 'ok';
-  const quota = { calls: { ...youtube.ledger.calls, espnScoreboard: fetched.requests }, estimatedUnits: youtube.ledger.units };
+  const quota = { calls: { ...youtube.ledger.calls, espn: fetched.requests }, estimatedUnits: youtube.ledger.units };
   store.finishRun(o.runId, o.now(), status, issues, quota);
-  return { runId: o.runId, status, issues, window, scans, outcomes, quota };
+  return { runId: o.runId, sport, status, issues, window, scans, outcomes, quota };
 }

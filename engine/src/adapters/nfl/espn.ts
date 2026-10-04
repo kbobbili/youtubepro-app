@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import type { EventStatus, SportEvent, Window } from '../../domain.ts';
+import type { EventStatus, NflEvent, Window } from '../../domain.ts';
+import type { EventFetchResult } from '../types.ts';
 import { getJson, type Transport } from '../../http.ts';
 
 /**
@@ -34,13 +35,6 @@ const EspnEvent = z.object({
 
 const Scoreboard = z.object({ events: z.array(z.unknown()) });
 
-export interface EventFetchResult {
-  events: SportEvent[];
-  /** False when any date failed or any event was malformed: the result must not be read as "no games". */
-  complete: boolean;
-  issues: string[];
-  requests: number;
-}
 
 function mapStatus(name: string, state: string, completed: boolean): EventStatus {
   if (name === 'STATUS_POSTPONED') return 'POSTPONED';
@@ -52,7 +46,7 @@ function mapStatus(name: string, state: string, completed: boolean): EventStatus
 }
 
 /** Normalize one raw ESPN event. Throws on malformed input. */
-export function normalizeEspnNflEvent(raw: unknown): SportEvent {
+export function normalizeEspnNflEvent(raw: unknown): NflEvent {
   const e = EspnEvent.parse(raw);
   const competitors = e.competitions[0]!.competitors;
   const home = competitors.find((c) => c.homeAway === 'home');
@@ -63,10 +57,13 @@ export function normalizeEspnNflEvent(raw: unknown): SportEvent {
     name: c.team.displayName,
     shortName: c.team.shortDisplayName,
   });
+  const h = team(home);
+  const a = team(away);
   return {
     id: `nfl:espn:${e.id}`,
     sport: 'nfl',
     competition: 'NFL',
+    competitionId: 'NFL',
     provider: 'espn',
     providerEventId: e.id,
     season: e.season.year,
@@ -76,8 +73,14 @@ export function normalizeEspnNflEvent(raw: unknown): SportEvent {
     startTime: new Date(e.date).toISOString(),
     status: mapStatus(e.status.type.name, e.status.type.state, e.status.type.completed),
     providerStatus: e.status.type.name,
-    home: team(home),
-    away: team(away),
+    home: h,
+    away: a,
+    stage: `Week ${e.week.number}`,
+    participants: [
+      { id: h.abbr, name: h.name, shortName: h.shortName, abbr: h.abbr, role: 'home' },
+      { id: a.abbr, name: a.name, shortName: a.shortName, abbr: a.abbr, role: 'away' },
+    ],
+    meta: { seasonType: e.season.type, week: e.week.number },
   };
 }
 
@@ -92,8 +95,8 @@ export function easternDatesFor(window: Window): string[] {
   return [...dates].sort();
 }
 
-export async function fetchNflEvents(transport: Transport, window: Window): Promise<EventFetchResult> {
-  const byId = new Map<string, SportEvent>();
+export async function fetchNflEvents(transport: Transport, window: Window): Promise<Omit<EventFetchResult, 'events'> & { events: NflEvent[] }> {
+  const byId = new Map<string, NflEvent>();
   const issues: string[] = [];
   let requests = 0;
   for (const date of easternDatesFor(window)) {

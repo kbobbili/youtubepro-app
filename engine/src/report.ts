@@ -1,8 +1,9 @@
 import type { Cohort, RunKind } from './domain.ts';
-import { ESTIMATED_GAME_DURATION_MS } from './adapters/nfl/matcher.ts';
+import { adapterFor } from './adapters/index.ts';
 import type { Store } from './store.ts';
 
 export interface Report {
+  sport: string;
   cohort: Cohort;
   kind: RunKind | 'all';
   runs: { total: number; ok: number; incomplete: number; failed: number; firstStartedAt?: string; lastStartedAt?: string; observationDays: number };
@@ -16,7 +17,7 @@ export interface Report {
   playback: { targetTvVerified: number; targetTvFailed: number; browserVerified: number };
   audits: { correct: number; wrong: number; unaudited: number };
   latency: {
-    /** Publish time minus estimated end (start + 3h15m). An estimate, not measured completion. */
+    /** Publish time minus estimated end (start + the sport's estimated duration). An estimate, not measured completion. */
     medianMinutesAfterEstimatedEnd?: number;
     /** Events with a prospective non-final → final observation pair (bounded completion). */
     eventsWithObservedCompletionBounds: number;
@@ -33,15 +34,16 @@ const median = (xs: number[]) => {
   return Math.round(s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2);
 };
 
-export function buildReport(store: Store, cohort: Cohort, kind: RunKind | 'all' = 'all'): Report {
+export function buildReport(store: Store, cohort: Cohort, kind: RunKind | 'all' = 'all', sport = 'nfl'): Report {
+  const adapter = adapterFor(sport);
   const kindClause = kind === 'all' ? '' : 'AND r.kind = ?';
   // Prospective coverage counts only games first observed before they ended; games already final when
   // observation began belong to the backfill baseline.
   const prospectiveClause = kind === 'prospective' ? 'AND e.last_observed_nonfinal_at IS NOT NULL' : '';
-  const args: string[] = kind === 'all' ? [cohort] : [cohort, kind];
+  const args: string[] = kind === 'all' ? [sport, cohort] : [sport, cohort, kind];
 
   const runs = store.db
-    .prepare(`SELECT r.status, r.started_at, r.quota_json FROM runs r WHERE r.sport = 'nfl' AND r.cohort = ? ${kindClause} ORDER BY r.started_at`)
+    .prepare(`SELECT r.status, r.started_at, r.quota_json FROM runs r WHERE r.sport = ? AND r.cohort = ? ${kindClause} ORDER BY r.started_at`)
     .all(...args) as { status: string | null; started_at: string; quota_json: string }[];
 
   const events = store.db
@@ -57,7 +59,7 @@ export function buildReport(store: Store, cohort: Cohort, kind: RunKind | 'all' 
        LEFT JOIN candidates c ON c.event_id = h.event_id AND c.video_id = h.video_id
        WHERE e.status = 'COMPLETED' ${prospectiveClause} AND e.id IN (
          SELECT re.event_id FROM run_events re JOIN runs r ON r.id = re.run_id
-         WHERE re.eligible = 1 AND r.cohort = ? ${kindClause})`,
+         WHERE re.eligible = 1 AND r.sport = ? AND r.cohort = ? ${kindClause})`,
     )
     .all(cohort, ...args) as {
     id: string; start_time: string; last_observed_nonfinal_at: string | null; first_observed_final_at: string | null;
@@ -82,7 +84,8 @@ export function buildReport(store: Store, cohort: Cohort, kind: RunKind | 'all' 
     else if (audit?.verdict === 'wrong') audits.wrong++;
     else audits.unaudited++;
     if (e.published_at) {
-      afterEnd.push((Date.parse(e.published_at) - (Date.parse(e.start_time) + ESTIMATED_GAME_DURATION_MS)) / 60_000);
+      const ev = store.event(e.id);
+      afterEnd.push((Date.parse(e.published_at) - (Date.parse(e.start_time) + (ev ? adapter.estimatedDurationMs(ev) : 0))) / 60_000);
       // Only meaningful when the game was being watched before it ended.
       if (e.found_at && e.last_observed_nonfinal_at) toDiscovery.push((Date.parse(e.found_at) - Date.parse(e.published_at)) / 60_000);
     }
@@ -92,6 +95,7 @@ export function buildReport(store: Store, cohort: Cohort, kind: RunKind | 'all' 
   const days = new Set(runs.filter((r) => r.status !== 'failed').map((r) => r.started_at.slice(0, 10)));
 
   return {
+    sport,
     cohort,
     kind,
     runs: {
@@ -108,7 +112,8 @@ export function buildReport(store: Store, cohort: Cohort, kind: RunKind | 'all' 
     metadataEligible: events.filter((e) => e.discovery === 'FOUND').length,
     pending: events.filter((e) => e.discovery === 'SEARCHING').length,
     unavailable: events.filter((e) => e.discovery === 'UNAVAILABLE').length,
-    incompleteOnly: events.filter((e) => e.discovery !== 'FOUND' && e.complete_attempts === 0).length,
+    // UNAVAILABLE without attempts means no trusted source covers the competition: a known gap, not an incomplete scan.
+    incompleteOnly: events.filter((e) => e.discovery !== 'FOUND' && e.discovery !== 'UNAVAILABLE' && e.complete_attempts === 0).length,
     playback,
     audits,
     latency: {

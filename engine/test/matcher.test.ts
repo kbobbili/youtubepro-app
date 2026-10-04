@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { matchNflCandidate, parseNflHighlightTitle } from '../src/adapters/nfl/matcher.ts';
-import type { SportEvent } from '../src/domain.ts';
+import type { NflEvent } from '../src/domain.ts';
 
 // Real titles from the official NFL channel, 2026 Week 3–4 (observed 2026-10-02).
 const REAL_GAME_TITLES: [string, string, string, number][] = [
@@ -23,8 +23,8 @@ const REAL_GAME_TITLES: [string, string, string, number][] = [
   ['Atlanta Falcons vs Green Bay Packers Game Highlights | 2026 NFL Season Week 3', 'ATL', 'GB', 3],
 ];
 
-const event = (over: Partial<SportEvent> = {}): SportEvent => ({
-  id: 'nfl:espn:401872953', sport: 'nfl', competition: 'NFL', provider: 'espn', providerEventId: '401872953',
+const event = (over: Partial<NflEvent> = {}): NflEvent => ({
+  id: 'nfl:espn:401872953', sport: 'nfl', competition: 'NFL', competitionId: 'NFL', provider: 'espn', providerEventId: '401872953', stage: 'Week 3', participants: [], meta: {},
   season: 2026, seasonType: 2, week: 3, startTime: '2026-09-27T17:00:00.000Z', status: 'COMPLETED', providerStatus: 'STATUS_FINAL',
   home: { abbr: 'BUF', name: 'Buffalo Bills', shortName: 'Bills' },
   away: { abbr: 'LAC', name: 'Los Angeles Chargers', shortName: 'Chargers' },

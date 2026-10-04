@@ -69,8 +69,9 @@ Experimental and under evaluation (open decision in `07-decisions.md`); it does 
 - Metadata screening is not playback evidence. Record device playback with `pnpm review --playback <videoId> verified|failed --env target-tv`.
 - Embedding-disabled videos are eligible for discovery and collections, because SmartTube does not embed (user decision 2026-10-03). The v1 library export, whose contract means "embeddable", still excludes them.
 
-**Onn gate (required before multi-sport expansion and before adding `sync-playlists --apply` to the hourly job):**
-1. Inspected dry run, then a manual `--apply` of the single `nfl` collection.
+**Onn gate (required before adding `sync-playlists --apply` to the hourly job):**
+Sequencing (user decision 2026-10-03): F1, soccer, tennis and cricket are built and audited first, and the first publish covers all enabled collections at once. The gate below runs on that first publish; device findings may still require changes to every sport.
+1. Inspected dry run, then a manual `--apply` of the enabled collections.
 2. On the Onn: SmartTube signed in to the publishing account (private playlists are visible only to it; using unlisted playlists needs an explicit decision). Check visibility, titles, thumbnails, exact order, auto-advance, remote controls, and Back/return behavior.
 3. Spoiler surfaces the engine does not control: "Up next"/autoplay suggestions, end screens, related videos, comments, and the duration/progress bar.
 4. How quickly playlist changes appear on the device (client caching).

@@ -79,13 +79,39 @@ export function trustedSources(sources: Source[], sport: string, competition: st
 
 // ---- Preferences -----------------------------------------------------------
 
+const Priority = z.enum(['must', 'high', 'normal', 'low']);
+/** A followed team by ESPN team ID (`name` is for readability). */
+const TeamPref = z.object({ id: z.string().min(1), name: z.string().min(1), priority: Priority });
+
 const Preferences = z.object({
   region: z.string().length(2),
   sports: z.object({
     nfl: z
       .object({
         enabled: z.boolean(),
-        teams: z.array(z.object({ abbr: z.string().min(1), name: z.string().min(1), priority: z.enum(['must', 'high', 'normal', 'low']) })),
+        teams: z.array(z.object({ abbr: z.string().min(1), name: z.string().min(1), priority: Priority })),
+      })
+      .optional(),
+    f1: z.object({ enabled: z.boolean(), sessions: z.array(z.literal('race')).min(1), priority: Priority }).optional(),
+    soccer: z.object({ enabled: z.boolean(), teams: z.array(TeamPref) }).optional(),
+    tennis: z
+      .object({
+        enabled: z.boolean(),
+        tour: z.literal('atp'),
+        /** A match is followed when either player's rank is at or better than this. */
+        rankThreshold: z.number().int().min(1),
+        /** Older ranking snapshots make eligibility unknown (incomplete run), never "no matches". */
+        maxRankingAgeDays: z.number().positive(),
+        priority: Priority,
+      })
+      .optional(),
+    cricket: z
+      .object({
+        enabled: z.boolean(),
+        /** Men's limited-overs internationals; Tests are deferred. */
+        formats: z.array(z.enum(['ODI', 'T20I'])).min(1),
+        teams: z.array(TeamPref),
+        includeIcc: z.boolean(),
       })
       .optional(),
   }),

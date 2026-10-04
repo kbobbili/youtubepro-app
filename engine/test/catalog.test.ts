@@ -2,7 +2,9 @@ import { CatalogSnapshot } from '@sportscenter/contracts';
 import { describe, expect, it } from 'vitest';
 import { buildCatalog, generateCatalog, type CatalogOptions } from '../src/catalog.ts';
 import { loadCollections, loadSources, repoRoot, type CollectionsConfig, type Preferences } from '../src/config.ts';
-import { discoverNfl } from '../src/pipeline.ts';
+import { nflAdapter } from '../src/adapters/nfl/index.ts';
+import type { NflEvent } from '../src/domain.ts';
+import { discover } from '../src/pipeline.ts';
 import { recordMetadataChecks } from '../src/revalidate.ts';
 import { Store } from '../src/store.ts';
 import type { VideoMetadata } from '../src/youtube/client.ts';
@@ -37,10 +39,12 @@ function seed(store: Store, o: { start: string; home: string; away: string; titl
   const n = ++seq;
   const eventId = `nfl:espn:${n}`;
   const videoId = `vid${n}`;
-  store.upsertEvent(
-    { id: eventId, sport: 'nfl', competition: 'NFL', provider: 'espn', providerEventId: String(n), season: 2026, seasonType: 2, week: 3, startTime: o.start, status: 'COMPLETED', providerStatus: 'STATUS_FINAL', home: team(o.home), away: team(o.away) },
-    o.start, false,
-  );
+  const event: NflEvent = {
+    id: eventId, sport: 'nfl', competition: 'NFL', competitionId: 'NFL', provider: 'espn', providerEventId: String(n), season: 2026, seasonType: 2, week: 3,
+    startTime: o.start, status: 'COMPLETED', providerStatus: 'STATUS_FINAL', home: team(o.home), away: team(o.away), stage: 'Week 3',
+    participants: [{ ...team(o.home), id: o.home, role: 'home' }, { ...team(o.away), id: o.away, role: 'away' }], meta: { seasonType: 2, week: 3 },
+  };
+  store.upsertEvent(event, o.start, false);
   store.setDiscovery(eventId, 'FOUND', o.start);
   store.upsertCandidate(
     { eventId, videoId, sourceId: 'nfl-youtube', channelId: NFL_CHANNEL, rawTitle: o.title ?? `${o.away} vs ${o.home} Game Highlights`, publishedAt: o.start, durationSeconds: 900, confidence: 1, flags: [], metadataEligible: true, metadataReasons: [] },
@@ -198,7 +202,7 @@ describe('catalog', () => {
   it('end to end: an embedding-disabled highlight is FOUND and catalogued, but stays out of the TV library export', async () => {
     const store = new Store(':memory:');
     const t = fixtureTransport(W3, (v) => (v.id === 'v__pg6qIYL4' ? { ...v, status: { ...(v as unknown as { status: object }).status, embeddable: false } } : v));
-    const r = await discoverNfl({
+    const r = await discover({ adapter: nflAdapter,
       store, eventsTransport: t, youtube: new YouTubeClient(t, 'test'), sources, prefs, window: { start: '2026-09-24T00:00:00.000Z', end: '2026-10-01T00:00:00.000Z' },
       cohort: 'personal', kind: 'backfill', runId: 'w3-embed', now: () => '2026-10-03T02:30:00.000Z',
     });
@@ -227,7 +231,7 @@ describe('catalog', () => {
   it('end to end from recorded Week 3 discovery: screened, neutral, no publisher titles', async () => {
     const store = new Store(':memory:');
     const t = w3Transport();
-    await discoverNfl({
+    await discover({ adapter: nflAdapter,
       store, eventsTransport: t, youtube: new YouTubeClient(t, 'test'), sources, prefs, window: { start: '2026-09-24T00:00:00.000Z', end: '2026-10-01T00:00:00.000Z' },
       cohort: 'personal', kind: 'backfill', runId: 'w3', now: () => '2026-10-03T02:30:00.000Z',
     });

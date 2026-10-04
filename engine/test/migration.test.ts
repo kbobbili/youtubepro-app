@@ -29,10 +29,16 @@ function legacyDb(): string {
   return file;
 }
 
+/** Every pre-existing value: whole rows for unchanged tables, the original columns for rebuilt `events`/`run_events`. */
+const LEGACY_EVENT_COLUMNS = 'id, sport, competition, provider, provider_event_id, season, season_type, week, start_time, status, provider_status, home_json, away_json, first_seen_at, last_seen_at, last_observed_nonfinal_at, first_observed_final_at';
 const dump = (file: string) => {
   const db = new DatabaseSync(file, { readOnly: true });
   try {
-    return Object.fromEntries(['runs', 'events', 'run_events', 'discovery', 'candidates', 'highlights', 'match_audits'].map((t) => [t, db.prepare(`SELECT * FROM ${t} ORDER BY 1`).all()]));
+    return {
+      ...Object.fromEntries(['runs', 'discovery', 'candidates', 'highlights', 'match_audits'].map((t) => [t, db.prepare(`SELECT * FROM ${t} ORDER BY 1`).all()])),
+      events: db.prepare(`SELECT ${LEGACY_EVENT_COLUMNS} FROM events ORDER BY id`).all(),
+      run_events: db.prepare('SELECT run_id, event_id, eligible FROM run_events ORDER BY 1, 2').all(),
+    };
   } finally {
     db.close();
   }
@@ -54,6 +60,19 @@ describe('store migrations', () => {
 
     const store = new Store(file);
     expect(userVersion(store.db)).toBe(MIGRATIONS.length);
+    // v3 derives generic fields from the legacy NFL columns without changing the stable ID.
+    expect(store.event('nfl:espn:1')).toMatchObject({
+      competitionId: 'NFL', stage: 'Week 3', meta: { seasonType: 2, week: 3 },
+      participants: [{ id: 'BUF', role: 'home' }, { id: 'LAC', role: 'away' }],
+    });
+    // Foreign keys still point at the rebuilt table, and a non-NFL event (no legacy columns) can be inserted.
+    expect(store.db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+    store.upsertEvent(
+      { id: 'f1:espn:9', sport: 'f1', competition: 'Formula 1', competitionId: 'F1', provider: 'espn', providerEventId: '9', season: 2026, startTime: '2026-09-26T11:00:00.000Z', status: 'COMPLETED', providerStatus: 'STATUS_FINAL', stage: 'Race', participants: [], meta: { gp: 'Azerbaijan Grand Prix' } },
+      'now', false,
+    );
+    store.setDiscovery('f1:espn:9', 'SEARCHING', 'now');
+    expect(store.db.prepare("SELECT week, home_json FROM events WHERE id = 'f1:espn:9'").get()).toEqual({ week: null, home_json: null });
     expect(store.installId(() => 'install-1')).toBe('install-1');
     expect(store.installId(() => 'install-2')).toBe('install-1'); // stable once created
     store.close();

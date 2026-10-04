@@ -1,7 +1,44 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import type { Cohort, DiscoveryStatus, RunIssue, RunKind, RunStatus, SportEvent, Window } from './domain.ts';
+import { isNflEvent, type Cohort, type DiscoveryStatus, type RunIssue, type RunKind, type RunStatus, type SportEvent, type Window } from './domain.ts';
+
+/** Raw `events` row (v3 schema). */
+export interface EventRow {
+  id: string;
+  sport: string;
+  competition: string;
+  competition_id: string;
+  provider: string;
+  provider_event_id: string;
+  season: number | null;
+  stage: string | null;
+  participants_json: string;
+  meta_json: string;
+  start_time: string;
+  status: string;
+  provider_status: string;
+}
+
+export function rowToEvent(r: EventRow): SportEvent {
+  return {
+    id: r.id, sport: r.sport, competition: r.competition, competitionId: r.competition_id, provider: r.provider, providerEventId: r.provider_event_id,
+    season: r.season, startTime: r.start_time, status: r.status as SportEvent['status'], providerStatus: r.provider_status, stage: r.stage,
+    participants: JSON.parse(r.participants_json), meta: JSON.parse(r.meta_json),
+  };
+}
+
+export interface RankingSnapshot {
+  /** Provider snapshot identity (e.g. ESPN season/week ref). */
+  id: string;
+  tour: string;
+  providerUpdatedAt: string;
+  fetchedAt: string;
+  /** True only when the full ranking list was read. */
+  complete: boolean;
+  /** Provider athlete ID → rank. Absent athletes in a complete snapshot rank below its last entry. */
+  ranks: Record<string, number>;
+}
 
 /** v1: the original NFL discovery schema (IF NOT EXISTS adopts databases created before versioning). */
 const SCHEMA_V1 = `
@@ -175,8 +212,68 @@ CREATE TABLE publish_runs (
 CREATE INDEX publish_runs_quota_day ON publish_runs (quota_day);
 `;
 
+/**
+ * v3: multi-sport events. Rebuilds `events` (SQLite's documented table-rebuild procedure; foreign keys are
+ * disabled by migrate() and checked before commit) to add generic columns and make NFL-only columns nullable.
+ * NFL rows keep their exact legacy values; participants, stage and meta are derived from them without
+ * changing stable IDs. Non-NFL sports never get fabricated home/away teams or weeks.
+ */
+const SCHEMA_V3 = `
+CREATE TABLE events_v3 (
+  id TEXT PRIMARY KEY,
+  sport TEXT NOT NULL,
+  competition TEXT NOT NULL,
+  competition_id TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  provider_event_id TEXT NOT NULL,
+  season INTEGER,
+  -- Legacy NFL-only columns: exact values for NFL rows, NULL for other sports.
+  season_type INTEGER,
+  week INTEGER,
+  home_json TEXT,
+  away_json TEXT,
+  stage TEXT,
+  participants_json TEXT NOT NULL,
+  meta_json TEXT NOT NULL DEFAULT '{}',
+  start_time TEXT NOT NULL,
+  status TEXT NOT NULL,
+  provider_status TEXT NOT NULL,
+  first_seen_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL,
+  -- Observation bounds for completion time. Never overwritten once set.
+  last_observed_nonfinal_at TEXT,
+  first_observed_final_at TEXT
+);
+INSERT INTO events_v3 (id, sport, competition, competition_id, provider, provider_event_id, season, season_type, week, home_json, away_json,
+  stage, participants_json, meta_json, start_time, status, provider_status, first_seen_at, last_seen_at, last_observed_nonfinal_at, first_observed_final_at)
+SELECT id, sport, competition, competition, provider, provider_event_id, season, season_type, week, home_json, away_json,
+  'Week ' || week,
+  json_array(
+    json_object('id', json_extract(home_json, '$.abbr'), 'name', json_extract(home_json, '$.name'), 'shortName', json_extract(home_json, '$.shortName'), 'abbr', json_extract(home_json, '$.abbr'), 'role', 'home'),
+    json_object('id', json_extract(away_json, '$.abbr'), 'name', json_extract(away_json, '$.name'), 'shortName', json_extract(away_json, '$.shortName'), 'abbr', json_extract(away_json, '$.abbr'), 'role', 'away')),
+  json_object('seasonType', season_type, 'week', week),
+  start_time, status, provider_status, first_seen_at, last_seen_at, last_observed_nonfinal_at, first_observed_final_at
+FROM events;
+DROP TABLE events;
+ALTER TABLE events_v3 RENAME TO events;
+CREATE INDEX events_sport_start ON events (sport, start_time);
+
+-- Per-run eligibility reason (e.g. tennis ranking outcome), alongside the existing eligible flag.
+ALTER TABLE run_events ADD COLUMN reason TEXT;
+
+-- Ranking snapshots used for eligibility (tennis). ranks_json maps provider athlete ID → rank.
+CREATE TABLE ranking_snapshots (
+  id TEXT PRIMARY KEY,
+  tour TEXT NOT NULL,
+  provider_updated_at TEXT NOT NULL,
+  fetched_at TEXT NOT NULL,
+  complete INTEGER NOT NULL,
+  ranks_json TEXT NOT NULL
+);
+`;
+
 /** Sequential migrations: MIGRATIONS[i] upgrades user_version i → i+1. Append only; never edit a shipped entry. */
-export const MIGRATIONS: readonly string[] = [SCHEMA_V1, SCHEMA_V2];
+export const MIGRATIONS: readonly string[] = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3];
 
 export class SchemaOutdatedError extends Error {}
 
@@ -198,16 +295,25 @@ export function verifyIntegrity(db: DatabaseSync): void {
 export function migrate(db: DatabaseSync, migrations: readonly string[] = MIGRATIONS): { from: number; to: number } {
   const from = userVersion(db);
   if (from > migrations.length) throw new Error(`Database schema v${from} is newer than this engine (v${migrations.length}); run the matching engine version`);
-  for (let v = from; v < migrations.length; v++) {
-    db.exec('BEGIN IMMEDIATE');
-    try {
-      db.exec(migrations[v]!);
-      db.exec(`PRAGMA user_version = ${v + 1}`);
-      db.exec('COMMIT');
-    } catch (err) {
-      db.exec('ROLLBACK');
-      throw new Error(`Migration to v${v + 1} failed and was rolled back: ${(err as Error).message}`);
+  // Table rebuilds require foreign keys off (it cannot change inside a transaction); each migration is
+  // checked with foreign_key_check before it commits, so a violation rolls that migration back.
+  db.exec('PRAGMA foreign_keys = OFF');
+  try {
+    for (let v = from; v < migrations.length; v++) {
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        db.exec(migrations[v]!);
+        const fk = db.prepare('PRAGMA foreign_key_check').all();
+        if (fk.length) throw new Error(`foreign_key_check: ${fk.length} violation(s)`);
+        db.exec(`PRAGMA user_version = ${v + 1}`);
+        db.exec('COMMIT');
+      } catch (err) {
+        db.exec('ROLLBACK');
+        throw new Error(`Migration to v${v + 1} failed and was rolled back: ${(err as Error).message}`);
+      }
     }
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON');
   }
   verifyIntegrity(db);
   return { from, to: userVersion(db) };
@@ -313,31 +419,59 @@ export class Store {
   /** Upsert an observed event; completion observation bounds are write-once. */
   upsertEvent(e: SportEvent, observedAt: string, prospective: boolean): void {
     const isFinal = e.status === 'COMPLETED';
+    const nfl = isNflEvent(e) ? e : undefined; // legacy columns stay populated for NFL readers
     this.db
       .prepare(
-        `INSERT INTO events (id, sport, competition, provider, provider_event_id, season, season_type, week, start_time, status,
-           provider_status, home_json, away_json, first_seen_at, last_seen_at, last_observed_nonfinal_at, first_observed_final_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        `INSERT INTO events (id, sport, competition, competition_id, provider, provider_event_id, season, season_type, week, home_json, away_json,
+           stage, participants_json, meta_json, start_time, status, provider_status, first_seen_at, last_seen_at, last_observed_nonfinal_at, first_observed_final_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
          ON CONFLICT(id) DO UPDATE SET
+           competition = excluded.competition, competition_id = excluded.competition_id,
            season = excluded.season, season_type = excluded.season_type, week = excluded.week,
+           home_json = excluded.home_json, away_json = excluded.away_json,
+           stage = excluded.stage, participants_json = excluded.participants_json, meta_json = excluded.meta_json,
            start_time = excluded.start_time, status = excluded.status, provider_status = excluded.provider_status,
-           home_json = excluded.home_json, away_json = excluded.away_json, last_seen_at = excluded.last_seen_at,
+           last_seen_at = excluded.last_seen_at,
            last_observed_nonfinal_at = CASE
              WHEN events.first_observed_final_at IS NULL AND excluded.last_observed_nonfinal_at IS NOT NULL
              THEN excluded.last_observed_nonfinal_at ELSE events.last_observed_nonfinal_at END,
            first_observed_final_at = COALESCE(events.first_observed_final_at, excluded.first_observed_final_at)`,
       )
       .run(
-        e.id, e.sport, e.competition, e.provider, e.providerEventId, e.season, e.seasonType, e.week, e.startTime, e.status,
-        e.providerStatus, JSON.stringify(e.home), JSON.stringify(e.away), observedAt, observedAt,
+        e.id, e.sport, e.competition, e.competitionId, e.provider, e.providerEventId, e.season,
+        nfl?.seasonType ?? null, nfl?.week ?? null, nfl ? JSON.stringify(nfl.home) : null, nfl ? JSON.stringify(nfl.away) : null,
+        e.stage, JSON.stringify(e.participants), JSON.stringify(e.meta), e.startTime, e.status, e.providerStatus, observedAt, observedAt,
         isFinal ? null : observedAt,
         // A backfill seeing an already-final game does not bound completion time; only prospective runs record it.
         isFinal && prospective ? observedAt : null,
       );
   }
 
-  recordRunEvent(runId: string, eventId: string, eligible: boolean): void {
-    this.db.prepare('INSERT OR REPLACE INTO run_events (run_id, event_id, eligible) VALUES (?,?,?)').run(runId, eventId, eligible ? 1 : 0);
+  /** Load a stored event in its generic form (no legacy NFL fields). */
+  event(id: string): SportEvent | undefined {
+    const r = this.db.prepare('SELECT * FROM events WHERE id = ?').get(id) as EventRow | undefined;
+    return r && rowToEvent(r);
+  }
+
+  recordRunEvent(runId: string, eventId: string, eligible: boolean, reason?: string): void {
+    this.db.prepare('INSERT OR REPLACE INTO run_events (run_id, event_id, eligible, reason) VALUES (?,?,?,?)').run(runId, eventId, eligible ? 1 : 0, reason ?? null);
+  }
+
+  saveRankingSnapshot(s: RankingSnapshot): void {
+    this.db
+      .prepare(
+        `INSERT INTO ranking_snapshots (id, tour, provider_updated_at, fetched_at, complete, ranks_json) VALUES (?,?,?,?,?,?)
+         ON CONFLICT(id) DO UPDATE SET fetched_at = excluded.fetched_at, complete = excluded.complete, ranks_json = excluded.ranks_json`,
+      )
+      .run(s.id, s.tour, s.providerUpdatedAt, s.fetchedAt, s.complete ? 1 : 0, JSON.stringify(s.ranks));
+  }
+
+  /** Most recent complete snapshot for a tour (by provider update time), if any. */
+  latestRankingSnapshot(tour: string): RankingSnapshot | undefined {
+    const r = this.db
+      .prepare('SELECT * FROM ranking_snapshots WHERE tour = ? AND complete = 1 ORDER BY provider_updated_at DESC, fetched_at DESC LIMIT 1')
+      .get(tour) as { id: string; tour: string; provider_updated_at: string; fetched_at: string; complete: number; ranks_json: string } | undefined;
+    return r && { id: r.id, tour: r.tour, providerUpdatedAt: r.provider_updated_at, fetchedAt: r.fetched_at, complete: r.complete === 1, ranks: JSON.parse(r.ranks_json) };
   }
 
   getDiscovery(eventId: string): { status: DiscoveryStatus; first_searched_at: string | null; found_at: string | null } | undefined {
