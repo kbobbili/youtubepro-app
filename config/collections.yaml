@@ -45,7 +45,7 @@ collections:
     sport: tennis
     windowDays: 30
     cap: 30
-    publish: false                # name order in ATP titles leaks winners (61%); pending user decision (docs/10-sport-integrations/tennis.md)
+    publish: true                 # name-order hint in ATP titles accepted by the user (2026-10-03)
 
   - id: cricket
     title: "SportsCenter · Cricket"
@@ -60,7 +60,7 @@ collections:
     kind: mixed
     windowDays: 7
     cap: 40
-    perSportCaps: { tennis: 0 }   # 0 keeps tennis out until the name-order decision; 10 was the planned cap
+    perSportCaps: { tennis: 10 }
     publish: true
 
   - id: bills

@@ -89,13 +89,14 @@ Sequencing (user decision 2026-10-03): F1, soccer, tennis and cricket are built 
 | NFL | NFL | 20/20 correct (Weeks 1–4; followed and diagnostic games) | Weeks 1–2 title variants added after the audit caught two misses |
 | F1 (race) | FORMULA 1 | 3/3 | — |
 | Soccer | NBC Sports (EPL), ESPN FC (LaLiga) | 7/7 sourced; 3 unavailable by design | No US Champions League source; one "LATE DRAMA" title screened out |
-| Tennis (ATP, Top 30) | ATP Tour | 35 found, 1 never uploaded, 9 pending | Not published: winner-first name order (open decision) |
+| Tennis (ATP, Top 30) | ATP Tour | 35 found, 1 never uploaded, 9 pending | Published; winner-first name-order hint accepted by the user |
 | Cricket (ODI/T20I) | Willow (per series) | 10/10 covered; 10 uncovered series; 4 never uploaded | Tests deferred; add series as Willow covers them |
 
 **Design deviations from the engine plan (2026-10-03):** each sport runs its own discovery (one uploads scan per source per sport) instead of a single combined channel scan, matching per-sport failure isolation; spoiler terms live in one per-sport table in `spoilers.ts` rather than behind the adapter interface; backfills may scan up to 60 uploads pages (hourly runs keep 20).
 
 **Publish log:**
 - 2026-10-03: first publish to channel `UCyR-Z8qASx9PoEuRow1M4LA` (new Google account, OAuth app "YouTubePro"): 10 private playlists, 47 placements (tennis held back). Newly created playlists returned `playlistNotFound` for about a minute (propagation), so items were added on the next run; the publisher now reports this as "created, filled next run" instead of "missing". A second apply against unchanged input made zero changes (11 read units). Day total ≈ 2,900 units.
+- 2026-10-03: tennis published after the user accepted the ATP name-order hint: tennis playlist (30) created and filled on the next run (propagation handled automatically); `this-week` gained 10 tennis matches (15 total). 11 playlists in all; a further apply made zero changes.
 
 **Device log:** _no observations yet._
 
