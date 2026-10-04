@@ -86,7 +86,7 @@ Sequencing (user decision 2026-10-03): F1, soccer, tennis and cricket are built 
 
 | Sport | Source(s) | Backfill result | Notes |
 | --- | --- | --- | --- |
-| NFL | NFL | 22/22 followed and diagnostic games correct (Weeks 1–4) | Weeks 1–2 title variants added after the audit caught two misses |
+| NFL | NFL | 20/20 correct (Weeks 1–4; followed and diagnostic games) | Weeks 1–2 title variants added after the audit caught two misses |
 | F1 (race) | FORMULA 1 | 3/3 | — |
 | Soccer | NBC Sports (EPL), ESPN FC (LaLiga) | 7/7 sourced; 3 unavailable by design | No US Champions League source; one "LATE DRAMA" title screened out |
 | Tennis (ATP, Top 30) | ATP Tour | 35 found, 1 never uploaded, 9 pending | Not published: winner-first name order (open decision) |
