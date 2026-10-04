@@ -294,6 +294,25 @@ describe('syncPlaylists', () => {
     expect(yt2.mutations).toBe(0);
   });
 
+  it('a just-created playlist that YouTube is not serving yet is filled on the next run; a deleted one is reported missing', async () => {
+    const store = new Store(':memory:');
+    const yt = new FakeYouTube();
+    // Observed 2026-10-03: playlistItems.list returns 404 playlistNotFound right after playlists.insert.
+    yt.next = { match: (r) => r.method === 'GET' && r.url.pathname.endsWith('/playlistItems'), status: 404, apply: false };
+    let r = await sync(store, yt, catalog(['a', 'b']));
+    expect(r.collections[0]).toMatchObject({ outcome: 'partial', backlog: 2, applied: { creates: 1 } });
+    expect(r.status).toBe('ok');
+    r = await sync(store, yt, catalog(['a', 'b']));
+    expect(r.collections[0]!.outcome).toBe('applied');
+    expect(yt.playlists.size).toBe(1);
+    expect(yt.videos(tracked(store)!.playlistId!)).toEqual(['a', 'b']);
+
+    yt.playlists.clear(); // user deleted it on YouTube
+    r = await sync(store, yt, catalog(['a', 'b']));
+    expect(r.collections[0]!.outcome).toBe('playlist_missing');
+    expect(yt.playlists.size).toBe(0); // never recreated automatically
+  });
+
   it('a definitely rejected creation is not tracked', async () => {
     const store = new Store(':memory:');
     const yt = new FakeYouTube();

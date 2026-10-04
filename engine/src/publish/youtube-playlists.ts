@@ -412,6 +412,13 @@ async function syncCollection(
   try {
     remote = await readPlaylistItems(api, tracked.playlistId!);
   } catch (err) {
+    if (err instanceof HttpError && err.status === 404 && report.applied.creates) {
+      // Observed 2026-10-03: a playlist created moments ago returns playlistNotFound until YouTube propagates it.
+      report.outcome = 'partial';
+      report.backlog = desired.length;
+      report.notes.push(`created ${tracked.playlistId}; YouTube is not serving it yet, so its videos are added on the next run`);
+      return;
+    }
     if (err instanceof HttpError && err.status === 404) {
       report.outcome = 'playlist_missing';
       report.notes.push(`tracked playlist ${tracked.playlistId} not found (${reasonOf(err) ?? '404'}); not recreated automatically`);

@@ -94,6 +94,9 @@ Sequencing (user decision 2026-10-03): F1, soccer, tennis and cricket are built 
 
 **Design deviations from the engine plan (2026-10-03):** each sport runs its own discovery (one uploads scan per source per sport) instead of a single combined channel scan, matching per-sport failure isolation; spoiler terms live in one per-sport table in `spoilers.ts` rather than behind the adapter interface; backfills may scan up to 60 uploads pages (hourly runs keep 20).
 
+**Publish log:**
+- 2026-10-03: first publish to channel `UCyR-Z8qASx9PoEuRow1M4LA` (new Google account, OAuth app "YouTubePro"): 10 private playlists, 47 placements (tennis held back). Newly created playlists returned `playlistNotFound` for about a minute (propagation), so items were added on the next run; the publisher now reports this as "created, filled next run" instead of "missing". A second apply against unchanged input made zero changes (11 read units). Day total ≈ 2,900 units.
+
 **Device log:** _no observations yet._
 
 ## Exit criteria
