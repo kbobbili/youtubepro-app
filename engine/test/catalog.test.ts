@@ -61,7 +61,9 @@ function okRun(store: Store, status: 'ok' | 'incomplete' = 'ok') {
   store.finishRun(id, NOW, status, [], {});
 }
 
-const baseConfig = loadCollections(root);
+// NFL-only preferences here, so only the NFL and mixed collections are in scope (other sports would report "not enabled").
+const loaded = loadCollections(root);
+const baseConfig = { ...loaded, collections: loaded.collections.filter((c) => c.kind === 'mixed' || c.sport === 'nfl') };
 function options(over: { prefs?: Preferences; collections?: Partial<CollectionsConfig>; publishing?: Partial<CollectionsConfig['publishing']>; sources?: typeof sources } = {}): CatalogOptions {
   return {
     prefs: over.prefs ?? prefs,
