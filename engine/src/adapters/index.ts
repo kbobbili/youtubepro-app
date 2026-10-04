@@ -1,9 +1,10 @@
 import { f1Adapter } from './f1/index.ts';
 import { nflAdapter } from './nfl/index.ts';
+import { soccerAdapter } from './soccer/index.ts';
 import type { SportAdapter } from './types.ts';
 
 /** Every sport with an adapter. The order is the order sports are listed in reports. */
-export const ADAPTERS: readonly SportAdapter[] = [nflAdapter as SportAdapter, f1Adapter as SportAdapter];
+export const ADAPTERS: readonly SportAdapter[] = [nflAdapter as SportAdapter, f1Adapter as SportAdapter, soccerAdapter as SportAdapter];
 
 export function adapterFor(sport: string): SportAdapter {
   const a = ADAPTERS.find((x) => x.sport === sport);

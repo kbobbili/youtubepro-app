@@ -32,6 +32,14 @@ collections:
     cap: 30
     publish: false
 
+  - id: soccer
+    title: "SportsCenter · Soccer"
+    kind: sport
+    sport: soccer
+    windowDays: 30
+    cap: 30
+    publish: false
+
   - id: this-week
     title: "SportsCenter · This Week"
     kind: mixed
@@ -54,6 +62,24 @@ collections:
     kind: team
     sport: nfl
     team: SF
+    windowDays: 30
+    cap: 30
+    publish: false
+
+  - id: arsenal
+    title: "SportsCenter · Arsenal"
+    kind: team
+    sport: soccer
+    team: "359"
+    windowDays: 30
+    cap: 30
+    publish: false
+
+  - id: real-madrid
+    title: "SportsCenter · Real Madrid"
+    kind: team
+    sport: soccer
+    team: "86"
     windowDays: 30
     cap: 30
     publish: false
