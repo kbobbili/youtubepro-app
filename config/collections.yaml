@@ -12,9 +12,8 @@ publishing:
   includeFlaggedTitles: false     # explicit overrides only; any override is shown in the dry run
   includeUnreviewedTitles: false
 
-# Only NFL collections exist while NFL is the only sport with an adapter. Expansion target, enabled
-# incrementally after the Onn device gate passes and each sport is audited:
-#   sport: f1, soccer, tennis, cricket    team: arsenal, real-madrid, india
+# Every sport now has an adapter (NFL, F1, soccer, tennis, cricket). `publish` turns on each playlist; the first
+# publish covers all enabled collections at once (user decision 2026-10-03), followed by the Onn device gate.
 collections:
   - id: nfl
     title: "SportsCenter · NFL"
@@ -44,6 +43,14 @@ collections:
     title: "SportsCenter · Tennis"
     kind: sport
     sport: tennis
+    windowDays: 30
+    cap: 30
+    publish: false
+
+  - id: cricket
+    title: "SportsCenter · Cricket"
+    kind: sport
+    sport: cricket
     windowDays: 30
     cap: 30
     publish: false
@@ -88,6 +95,15 @@ collections:
     kind: team
     sport: soccer
     team: "86"
+    windowDays: 30
+    cap: 30
+    publish: false
+
+  - id: india
+    title: "SportsCenter · India"
+    kind: team
+    sport: cricket
+    team: "6"
     windowDays: 30
     cap: 30
     publish: false
